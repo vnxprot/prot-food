@@ -1,4 +1,5 @@
 export type Status = "muon_den" | "da_den";
+// Legacy data may still contain "binh_thuong". The simplified UI no longer writes it.
 export type TasteRating = "ngon" | "binh_thuong" | "khong_ngon";
 export type PriceLevel = "re" | "binh_thuong" | "dat";
 export type GeocodeSource = "nominatim" | "manual" | "unset";
@@ -8,15 +9,6 @@ export type Ward = {
   name: string;
   type: "phuong" | "xa";
   old_names?: string[] | null;
-};
-
-export type VisitLog = {
-  id: string;
-  restaurant_id: string;
-  visited_at: string;
-  taste_rating: TasteRating | null;
-  price_level: PriceLevel | null;
-  note: string | null;
 };
 
 export type Restaurant = {
@@ -44,13 +36,9 @@ export type Restaurant = {
 
 export type RestaurantDraft = {
   name: string;
-  shop_note: string;
   address_raw: string;
-  category: string;
-  status: Status;
-  coordinates: string;
-  visited_at: string;
-  taste_rating: TasteRating | "";
-  price_level: PriceLevel | "";
   notes: string;
+  status: Status;
+  taste_rating: "ngon" | "khong_ngon" | "";
+  coordinates: string;
 };
