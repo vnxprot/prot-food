@@ -1,13 +1,22 @@
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
 type SeedItem = { id: number; name: string; shop_note: string | null; address_raw: string | null; visited: boolean; category: string; duplicate_of: number | null };
 type Seed = { items: SeedItem[] };
 type Ward = { id: string; name: string; old_names: string[] | null };
+type ExistingRestaurant = { id: string; name: string; address_raw: string | null; is_duplicate_of: string | null };
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const envPath = path.resolve(process.cwd(), ".env.local");
+const fileEnv = fs.existsSync(envPath)
+  ? Object.fromEntries(fs.readFileSync(envPath, "utf8").split(/\r?\n/).flatMap((line) => {
+      const match = line.match(/^\s*([A-Z0-9_]+)=(.*)\s*$/);
+      return match ? [[match[1], match[2]]] : [];
+    }))
+  : {};
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || fileEnv.NEXT_PUBLIC_SUPABASE_URL;
+const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || fileEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 if (!supabaseUrl || !KEY) throw new Error("Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY) first.");
 const supabase = createClient(supabaseUrl, KEY, { auth: { persistSession: false } });
 const seedPath = process.env.SEED_PATH || path.resolve(process.cwd(), "docs", "seed_quan_an.json");
@@ -33,9 +42,12 @@ async function geocode(address: string) {
 }
 
 async function main() {
-  const seed = JSON.parse(await fs.readFile(seedPath, "utf8")) as Seed;
+  const seed = JSON.parse(await fsPromises.readFile(seedPath, "utf8")) as Seed;
   const { data: wards, error: wardsError } = await supabase.from("admin_wards").select("id,name,old_names");
   if (wardsError) throw wardsError;
+  const { data: existing, error: existingError } = await supabase.from("restaurants").select("id,name,address_raw,is_duplicate_of").order("created_at");
+  if (existingError) throw existingError;
+  const unusedExistingIds = new Set((existing as ExistingRestaurant[]).map((row) => row.id));
   const insertedBySeedId = new Map<number, string>();
   for (const item of seed.items) {
     let point: { lat: number; lng: number } | null = null;
@@ -53,9 +65,20 @@ async function main() {
       is_duplicate_of: item.duplicate_of ? insertedBySeedId.get(item.duplicate_of) || null : null,
       notes: item.duplicate_of ? `Duplicate of seed item ${item.duplicate_of}.` : null,
     };
-    const { data, error } = await supabase.from("restaurants").insert(payload).select("id").single();
-    if (error) throw error;
-    insertedBySeedId.set(item.id, data.id);
+    const matches = (existing as ExistingRestaurant[]).filter((row) => unusedExistingIds.has(row.id) && row.name === item.name && row.address_raw === item.address_raw);
+    const existingRow = item.duplicate_of
+      ? matches.find((row) => row.is_duplicate_of !== null) || matches[0]
+      : matches.find((row) => row.is_duplicate_of === null) || matches[0];
+    if (existingRow) {
+      const { error } = await supabase.from("restaurants").update(payload).eq("id", existingRow.id);
+      if (error) throw error;
+      unusedExistingIds.delete(existingRow.id);
+      insertedBySeedId.set(item.id, existingRow.id);
+    } else {
+      const { data, error } = await supabase.from("restaurants").insert(payload).select("id").single();
+      if (error) throw error;
+      insertedBySeedId.set(item.id, data.id);
+    }
     console.log(`[${item.id}/${seed.items.length}] ${item.name}: ${point ? "geocoded" : "no coordinates"}`);
   }
 }
