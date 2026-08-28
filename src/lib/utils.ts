@@ -19,9 +19,13 @@ export function formatDistance(distance?: number | null) {
 }
 
 export function directionsUrl(restaurant: Restaurant) {
-  const destination = restaurant.lat != null && restaurant.lng != null
+  // Coordinates from automatic geocoding are deliberately not used for routing.
+  // A street-level Nominatim match can be hundreds of metres away from the shop.
+  // Only a manually verified pin is safe to send to Google Maps as coordinates.
+  const hasVerifiedPin = restaurant.lat != null && restaurant.lng != null && restaurant.geocode_confidence === "manual";
+  const destination = hasVerifiedPin
     ? `${restaurant.lat},${restaurant.lng}`
-    : encodeURIComponent(restaurant.address_raw || restaurant.name);
+    : encodeURIComponent([restaurant.name, restaurant.address_raw, "Hà Nội, Việt Nam"].filter(Boolean).join(", "));
   return `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
 }
 

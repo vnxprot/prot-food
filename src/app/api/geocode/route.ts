@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   const address = request.nextUrl.searchParams.get("address")?.trim();
+  const name = request.nextUrl.searchParams.get("name")?.trim();
   if (!address) return NextResponse.json({ error: "Thiếu địa chỉ" }, { status: 400 });
-  const query = `${address}, Hà Nội, Việt Nam`;
+  // Include the venue name so that Nominatim can prefer a POI over a street.
+  // The app still labels this result low-confidence until manually checked.
+  const query = [name, address, "Hà Nội, Việt Nam"].filter(Boolean).join(", ");
   const endpoint = new URL("https://nominatim.openstreetmap.org/search");
   endpoint.searchParams.set("format", "json");
-  endpoint.searchParams.set("limit", "1");
+  endpoint.searchParams.set("limit", "5");
   endpoint.searchParams.set("countrycodes", "vn");
   endpoint.searchParams.set("q", query);
   try {
@@ -16,9 +19,10 @@ export async function GET(request: NextRequest) {
     });
     if (!response.ok) throw new Error("Nominatim không phản hồi");
     const results = await response.json() as Array<{ lat: string; lon: string; display_name: string }>;
-    const first = results[0];
-    if (!first) return NextResponse.json({ result: null });
-    return NextResponse.json({ result: { lat: Number(first.lat), lng: Number(first.lon), displayName: first.display_name } });
+    const normalizedName = name?.toLocaleLowerCase("vi") || "";
+    const match = results.find((item) => normalizedName && item.display_name.toLocaleLowerCase("vi").includes(normalizedName)) || results[0];
+    if (!match) return NextResponse.json({ result: null });
+    return NextResponse.json({ result: { lat: Number(match.lat), lng: Number(match.lon), displayName: match.display_name } });
   } catch {
     return NextResponse.json({ result: null }, { status: 200 });
   }
