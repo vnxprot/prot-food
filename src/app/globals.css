@@ -3,22 +3,55 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #fbf3ea;
+  --foreground: #402c1e;
+  --muted: #8a7360;
+  --glass: rgba(255, 251, 247, 0.60);
+  --glass-border: rgba(64, 44, 30, 0.11);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #1c130d;
+    --foreground: #f7eadc;
+    --muted: #cbb4a0;
+    --glass: rgba(64, 44, 30, 0.54);
+    --glass-border: rgba(255, 239, 218, 0.14);
   }
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-be-vietnam-pro), Arial, sans-serif;
+  min-height: 100vh;
 }
+
+* { -webkit-tap-highlight-color: transparent; }
+button, input, select, textarea { font: inherit; }
+button { touch-action: manipulation; }
+
+.app-background {
+  background:
+    radial-gradient(circle at 15% -10%, rgba(229, 163, 106, 0.38), transparent 32rem),
+    radial-gradient(circle at 105% 18%, rgba(163, 94, 45, 0.15), transparent 28rem),
+    var(--background);
+}
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 12px 34px -20px rgba(64, 44, 30, 0.42);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+@media (min-width: 768px) {
+  .glass { border-radius: 12px; box-shadow: 0 8px 24px -16px rgba(64, 44, 30, 0.38); }
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.animate-rise { animation: rise 280ms ease-out both; }
 
 @layer utilities {
   .text-balance {

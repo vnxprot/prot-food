@@ -1,0 +1,10 @@
+{
+  "name": "Prot Food",
+  "short_name": "Prot Food",
+  "description": "Danh sách quán ăn/uống Hà Nội của Prot",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FBF3EA",
+  "theme_color": "#402C1E",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

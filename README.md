@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Prot Food
 
-## Getting Started
+PWA cá nhân để quản lý quán ăn/uống ở Hà Nội. Stack: Next.js 14 App Router, TypeScript, Tailwind, Supabase, Nominatim và Vercel.
 
-First, run the development server:
+## Chạy local
 
 ```bash
+npm install
+Copy-Item .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Điền hai biến Supabase vào `.env.local`. File này đã bị Git bỏ qua.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Cơ sở dữ liệu
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Schema và dữ liệu phường/xã tối thiểu nằm ở `supabase/migrations`. Áp dụng bằng Supabase CLI sau khi link project:
 
-## Learn More
+```bash
+supabase db push
+```
 
-To learn more about Next.js, take a look at the following resources:
+Seed hiện bao gồm các phường/địa danh xuất hiện trong 41 quán, với TODO mở rộng đầy đủ 126 đơn vị cấp xã Hà Nội theo thay đổi 01/07/2025.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Import và geocode seed
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+`docs/seed_quan_an.json` là bản sao dữ liệu đầu vào. Lệnh dưới đây lần lượt geocode qua Nominatim với User-Agent rõ ràng và chờ 1.1 giây giữa các request:
 
-## Deploy on Vercel
+```bash
+npm run geocode:seed
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Script dùng `SUPABASE_SERVICE_ROLE_KEY` nếu có, nếu không dùng `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Mỗi kết quả Nominatim được đánh dấu confidence `low` để review lại trong app. Không có map SDK hoặc API Google Maps trong project; nút chỉ đường chỉ mở Google Maps qua URL.
