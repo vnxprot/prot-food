@@ -1129,17 +1129,32 @@ export default function Home() {
         ),
     [filtered, position],
   );
-  const routeCandidates = useMemo(
+  const routeCandidateKey = useMemo(
     () =>
       nearbyByAir
         .filter(({ item, airDistance }) => airDistance != null && isRouteEligible(item))
         .slice(0, ROUTE_CANDIDATE_LIMIT)
-        .map(({ item }) => ({ id: item.id, lat: item.lat!, lng: item.lng! })),
+        .map(({ item }) => item.id)
+        .join(","),
     [nearbyByAir],
   );
-  const routeCandidateKey = useMemo(
-    () => routeCandidates.map((item) => item.id).join(","),
-    [routeCandidates],
+  const routeCandidates = useMemo(
+    () => {
+      const restaurantsById = new Map(restaurants.map((item) => [item.id, item]));
+      return routeCandidateKey
+        .split(",")
+        .filter(Boolean)
+        .map((id) => {
+          const item = restaurantsById.get(id);
+          return item && item.lat != null && item.lng != null
+            ? { id: item.id, lat: item.lat, lng: item.lng }
+            : null;
+        })
+        .filter(
+          (item): item is { id: string; lat: number; lng: number } => item != null,
+        );
+    },
+    [restaurants, routeCandidateKey],
   );
   useEffect(() => {
     if (tab !== "nearby" || !position) {
