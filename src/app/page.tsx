@@ -59,6 +59,11 @@ type RouteCache = {
 
 const ROUTE_CACHE_MS = 10 * 60 * 1_000;
 const ROUTE_CANDIDATE_LIMIT = 12;
+// GPS updates can arrive several times per second while moving. Recalculate
+// routes only after a meaningful move, otherwise the routing service rate
+// limit would make the UI alternate between loading and fallback states.
+const ROUTE_RECALCULATION_DISTANCE_KM = 0.15;
+const ROUTE_RECALCULATION_DEBOUNCE_MS = 2_500;
 
 function routeCacheKey(position: Position) {
   // Around 110m in Hanoi: accurate enough to cache without needlessly sharing
@@ -981,6 +986,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
+  const [routingPosition, setRoutingPosition] = useState<Position | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [roadRoutes, setRoadRoutes] = useState<Record<string, RoadRoute>>({});
   const [routingState, setRoutingState] = useState<
@@ -998,6 +1004,7 @@ export default function Home() {
   );
   const [toast, setToast] = useState<string | null>(null);
   const locationWatchRef = useRef<number | null>(null);
+  const roadRoutesRef = useRef<Record<string, RoadRoute>>({});
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(null), 3200);
@@ -1135,17 +1142,47 @@ export default function Home() {
     [routeCandidates],
   );
   useEffect(() => {
-    if (tab !== "nearby" || !position || !routeCandidates.length) {
+    if (tab !== "nearby" || !position) {
+      setRoutingPosition(null);
+      return;
+    }
+
+    if (!routingPosition) {
+      setRoutingPosition(position);
+      return;
+    }
+
+    if (
+      haversineKm(
+        routingPosition.lat,
+        routingPosition.lng,
+        position.lat,
+        position.lng,
+      ) < ROUTE_RECALCULATION_DISTANCE_KM
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(
+      () => setRoutingPosition(position),
+      ROUTE_RECALCULATION_DEBOUNCE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [position, routingPosition, tab]);
+  useEffect(() => {
+    if (tab !== "nearby" || !routingPosition || !routeCandidates.length) {
+      roadRoutesRef.current = {};
       setRoadRoutes({});
       setRoutingState("idle");
       return;
     }
-    const cacheKey = routeCacheKey(position);
+    const cacheKey = routeCacheKey(routingPosition);
     const cachedRaw = window.localStorage.getItem(cacheKey);
     if (cachedRaw) {
       try {
         const cached = JSON.parse(cachedRaw) as RouteCache;
         if (Date.now() - cached.savedAt < ROUTE_CACHE_MS) {
+          roadRoutesRef.current = cached.routes;
           setRoadRoutes(cached.routes);
           setRoutingState("ready");
           return;
@@ -1156,14 +1193,13 @@ export default function Home() {
     }
 
     const controller = new AbortController();
-    setRoadRoutes({});
     setRoutingState("loading");
     (async () => {
       try {
         const response = await fetch("/api/routing", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ origin: position, destinations: routeCandidates }),
+          body: JSON.stringify({ origin: routingPosition, destinations: routeCandidates }),
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("Routing không phản hồi");
@@ -1176,6 +1212,7 @@ export default function Home() {
             routes[id] = { distanceKm: meters / 1000 };
         }
         if (!controller.signal.aborted) {
+          roadRoutesRef.current = routes;
           setRoadRoutes(routes);
           setRoutingState("ready");
           window.localStorage.setItem(
@@ -1184,11 +1221,17 @@ export default function Home() {
           );
         }
       } catch {
-        if (!controller.signal.aborted) setRoutingState("unavailable");
+        if (!controller.signal.aborted) {
+          setRoutingState((current) =>
+            Object.keys(roadRoutesRef.current).length > 0 || current === "ready"
+              ? "ready"
+              : "unavailable",
+          );
+        }
       }
     })();
     return () => controller.abort();
-  }, [tab, position, routeCandidateKey, routeCandidates]);
+  }, [tab, routingPosition, routeCandidateKey, routeCandidates]);
   const nearby = useMemo(
     () =>
       nearbyByAir
