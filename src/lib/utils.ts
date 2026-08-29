@@ -18,7 +18,12 @@ export function formatDistance(distance?: number | null) {
   return `${distance.toFixed(distance < 10 ? 1 : 0)}km`;
 }
 
-export function directionsUrl(restaurant: Restaurant) {
+export type TravelMode = "two-wheeler" | "driving";
+
+export function directionsUrl(
+  restaurant: Restaurant,
+  travelMode: TravelMode = "two-wheeler",
+) {
   // Coordinates from automatic geocoding are deliberately not used for routing.
   // A street-level Nominatim match can be hundreds of metres away from the shop.
   // Only a manually verified pin is safe to send to Google Maps as coordinates.
@@ -26,7 +31,7 @@ export function directionsUrl(restaurant: Restaurant) {
   const destination = hasVerifiedPin
     ? `${restaurant.lat},${restaurant.lng}`
     : encodeURIComponent([restaurant.name, restaurant.address_raw, "Hà Nội, Việt Nam"].filter(Boolean).join(", "));
-  return `https://www.google.com/maps/dir/?api=1&destination=${destination}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=${travelMode}`;
 }
 
 export function relativeDate(date?: string | null) {

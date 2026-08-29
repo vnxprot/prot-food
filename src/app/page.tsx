@@ -3,6 +3,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
+  Bike,
+  CarFront,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -37,6 +39,7 @@ import {
   formatDistance,
   haversineKm,
   statusLabel,
+  type TravelMode,
 } from "@/lib/utils";
 import {
   downloadCsv,
@@ -48,6 +51,29 @@ import {
 type Tab = "nearby" | "list" | "profile" | "report";
 type FilterStatus = "all" | Status;
 type Position = { lat: number; lng: number };
+type RoadRoute = { distanceKm: number };
+type RouteCache = {
+  savedAt: number;
+  routes: Record<string, RoadRoute>;
+};
+
+const ROUTE_CACHE_MS = 10 * 60 * 1_000;
+const ROUTE_CANDIDATE_LIMIT = 12;
+
+function routeCacheKey(position: Position) {
+  // Around 110m in Hanoi: accurate enough to cache without needlessly sharing
+  // a new precise GPS coordinate as the user takes a few steps.
+  return `prot-food-route-v2:${position.lat.toFixed(3)}:${position.lng.toFixed(3)}`;
+}
+
+function isRouteEligible(restaurant: Restaurant) {
+  return (
+    restaurant.lat != null &&
+    restaurant.lng != null &&
+    restaurant.geocode_confidence !== "low" &&
+    restaurant.location_verification !== "closed"
+  );
+}
 
 const emptyDraft = (): RestaurantDraft => ({
   name: "",
@@ -152,11 +178,15 @@ function TasteBadge({ taste }: { taste: Restaurant["taste_rating"] }) {
 
 function RestaurantCard({
   restaurant,
-  distance,
+  airDistance,
+  roadRoute,
+  travelMode = "two-wheeler",
   onOpen,
 }: {
   restaurant: Restaurant;
-  distance?: number;
+  airDistance?: number;
+  roadRoute?: RoadRoute;
+  travelMode?: TravelMode;
   onOpen: () => void;
 }) {
   const ward = restaurant.admin_wards?.name;
@@ -186,13 +216,27 @@ function RestaurantCard({
             )}
           </div>
         </div>
-        {distance != null ? (
-          <div className="rounded-2xl bg-gradient-to-br from-[#a35e2d] to-[#e5a36a] px-3 py-2 text-center text-white shadow-sm">
+        {roadRoute ? (
+          <div className="min-w-[72px] rounded-2xl bg-gradient-to-br from-[#a35e2d] to-[#e5a36a] px-2.5 py-2 text-center text-white shadow-sm">
             <span className="block text-[18px] font-extrabold leading-none">
-              {formatDistance(distance).replace("km", "").replace("m", "")}
+              {formatDistance(roadRoute.distanceKm)}
             </span>
-            <span className="mt-0.5 block text-[10px] font-bold leading-none opacity-90">
-              {distance < 1 ? "m" : "km"}
+            <span className="mt-1 block text-[10px] font-bold leading-none opacity-90">
+              đường bộ
+            </span>
+            {airDistance != null && (
+              <span className="mt-1.5 block text-[9px] font-medium leading-none opacity-80">
+                ↗ {formatDistance(airDistance)} thẳng
+              </span>
+            )}
+          </div>
+        ) : airDistance != null ? (
+          <div className="min-w-[72px] rounded-2xl bg-[#402c1e]/7 px-2.5 py-2 text-center text-[#402c1e] dark:bg-[#f7eadc]/10 dark:text-[#f7eadc]">
+            <span className="block text-[15px] font-extrabold leading-none">
+              ↗ {formatDistance(airDistance)}
+            </span>
+            <span className="mt-1 block text-[10px] font-bold leading-none opacity-75">
+              đường thẳng
             </span>
           </div>
         ) : (
@@ -200,7 +244,7 @@ function RestaurantCard({
         )}
       </button>
       <a
-        href={directionsUrl(restaurant)}
+        href={directionsUrl(restaurant, travelMode)}
         target="_blank"
         rel="noopener noreferrer"
         onClick={(event) => event.stopPropagation()}
@@ -482,6 +526,7 @@ function Detail({
   onDelete,
   onStatus,
   onTaste,
+  travelMode,
 }: {
   restaurant: Restaurant;
   onClose: () => void;
@@ -489,6 +534,7 @@ function Detail({
   onDelete: () => void;
   onStatus: (status: Status) => Promise<void>;
   onTaste: (taste: "ngon" | "khong_ngon" | null) => Promise<void>;
+  travelMode: TravelMode;
 }) {
   const [updating, setUpdating] = useState(false);
   const update = async (task: () => Promise<void>) => {
@@ -551,7 +597,7 @@ function Detail({
             )}
           </p>
           <a
-            href={directionsUrl(restaurant)}
+            href={directionsUrl(restaurant, travelMode)}
             target="_blank"
             rel="noopener noreferrer"
             className="mt-4 flex items-center justify-center gap-2 rounded-xl bg-[#402c1e] py-3 text-sm font-extrabold text-[#fbf3ea]"
@@ -936,6 +982,11 @@ export default function Home() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [roadRoutes, setRoadRoutes] = useState<Record<string, RoadRoute>>({});
+  const [routingState, setRoutingState] = useState<
+    "idle" | "loading" | "ready" | "unavailable"
+  >("idle");
+  const [travelMode, setTravelMode] = useState<TravelMode>("two-wheeler");
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [status, setStatus] = useState<FilterStatus>("all");
@@ -950,6 +1001,10 @@ export default function Home() {
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(null), 3200);
+  };
+  const setPreferredTravelMode = (mode: TravelMode) => {
+    setTravelMode(mode);
+    window.localStorage.setItem("prot-food-travel-mode", mode);
   };
   async function refresh() {
     if (!supabase) {
@@ -970,6 +1025,11 @@ export default function Home() {
   }
   useEffect(() => {
     refresh();
+  }, []);
+  useEffect(() => {
+    const savedMode = window.localStorage.getItem("prot-food-travel-mode");
+    if (savedMode === "two-wheeler" || savedMode === "driving")
+      setTravelMode(savedMode);
   }, []);
   useEffect(() => {
     const timer = window.setTimeout(() => setSearchQuery(search), 250);
@@ -1044,20 +1104,105 @@ export default function Home() {
       }),
     [restaurants, searchQuery, status, category, ward],
   );
-  const nearby = useMemo(
+  const nearbyByAir = useMemo(
     () =>
       filtered
         .map((item) => ({
           item,
-          distance:
+          airDistance:
             position &&
             item.lat != null &&
             item.lng != null
               ? haversineKm(position.lat, position.lng, item.lat, item.lng)
               : undefined,
         }))
-        .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity)),
+        .sort(
+          (a, b) =>
+            (a.airDistance ?? Infinity) - (b.airDistance ?? Infinity),
+        ),
     [filtered, position],
+  );
+  const routeCandidates = useMemo(
+    () =>
+      nearbyByAir
+        .filter(({ item, airDistance }) => airDistance != null && isRouteEligible(item))
+        .slice(0, ROUTE_CANDIDATE_LIMIT)
+        .map(({ item }) => ({ id: item.id, lat: item.lat!, lng: item.lng! })),
+    [nearbyByAir],
+  );
+  const routeCandidateKey = useMemo(
+    () => routeCandidates.map((item) => item.id).join(","),
+    [routeCandidates],
+  );
+  useEffect(() => {
+    if (tab !== "nearby" || !position || !routeCandidates.length) {
+      setRoadRoutes({});
+      setRoutingState("idle");
+      return;
+    }
+    const cacheKey = routeCacheKey(position);
+    const cachedRaw = window.localStorage.getItem(cacheKey);
+    if (cachedRaw) {
+      try {
+        const cached = JSON.parse(cachedRaw) as RouteCache;
+        if (Date.now() - cached.savedAt < ROUTE_CACHE_MS) {
+          setRoadRoutes(cached.routes);
+          setRoutingState("ready");
+          return;
+        }
+      } catch {
+        window.localStorage.removeItem(cacheKey);
+      }
+    }
+
+    const controller = new AbortController();
+    setRoadRoutes({});
+    setRoutingState("loading");
+    (async () => {
+      try {
+        const response = await fetch("/api/routing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ origin: position, destinations: routeCandidates }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Routing không phản hồi");
+        const data = (await response.json()) as {
+          distances: Record<string, number | null>;
+        };
+        const routes: Record<string, RoadRoute> = {};
+        for (const [id, meters] of Object.entries(data.distances)) {
+          if (typeof meters === "number" && meters > 0)
+            routes[id] = { distanceKm: meters / 1000 };
+        }
+        if (!controller.signal.aborted) {
+          setRoadRoutes(routes);
+          setRoutingState("ready");
+          window.localStorage.setItem(
+            cacheKey,
+            JSON.stringify({ savedAt: Date.now(), routes } satisfies RouteCache),
+          );
+        }
+      } catch {
+        if (!controller.signal.aborted) setRoutingState("unavailable");
+      }
+    })();
+    return () => controller.abort();
+  }, [tab, position, routeCandidateKey, routeCandidates]);
+  const nearby = useMemo(
+    () =>
+      nearbyByAir
+        .map(({ item, airDistance }) => ({
+          item,
+          airDistance,
+          roadRoute: roadRoutes[item.id],
+        }))
+        .sort(
+          (a, b) =>
+            (a.roadRoute?.distanceKm ?? a.airDistance ?? Infinity) -
+            (b.roadRoute?.distanceKm ?? b.airDistance ?? Infinity),
+        ),
+    [nearbyByAir, roadRoutes],
   );
   const visited = restaurants.filter((item) => item.status === "da_den");
   const good = visited.filter((item) => item.taste_rating === "ngon");
@@ -1212,13 +1357,13 @@ export default function Home() {
             ))}
           </nav>
           <p className="mt-auto px-3 text-xs leading-relaxed text-[#8a7360]">
-            PWA cá nhân · không có bản đồ trong app.<br />v1.0.0
+            PWA cá nhân · không có bản đồ trong app.<br />v2.0.0
           </p>
         </aside>
         <section className="min-w-0 flex-1 px-4 pb-28 pt-6 sm:px-6 md:px-10 md:pb-10">
           <header className="mb-5">
             <p className="text-[11px] font-extrabold tracking-[0.18em] text-[#a35e2d] md:hidden">
-              PROT FOOD · v1.0.0
+              PROT FOOD · v2.0.0
             </p>
             <h1 className="mt-1 text-3xl font-extrabold tracking-tight">
               {pageTitle}
@@ -1253,7 +1398,13 @@ export default function Home() {
                     </p>
                     <p className="mt-0.5 text-xs text-[#8a7360]">
                       {position
-                        ? `${nearby.filter((item) => item.distance != null).length} quán có thể tính khoảng cách`
+                        ? routingState === "loading"
+                          ? "Đang tính quãng đường theo mạng lưới đường…"
+                          : routingState === "ready"
+                            ? `${Object.keys(roadRoutes).length} quán gần nhất có quãng đường đi`
+                            : routingState === "unavailable"
+                              ? "Tạm dùng khoảng cách đường thẳng"
+                              : `${nearby.filter((item) => item.airDistance != null).length} quán có thể tính khoảng cách`
                         : locationError || "Đang xin quyền vị trí…"}
                     </p>
                   </div>
@@ -1265,6 +1416,35 @@ export default function Home() {
                     <RefreshCw size={17} />
                   </button>
                 </div>
+                {position && (
+                  <>
+                    <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[#402c1e]/5 px-3 py-2.5 dark:bg-[#f7eadc]/8">
+                      <div>
+                        <p className="text-xs font-bold">Chỉ đường mặc định</p>
+                        <p className="mt-0.5 text-[11px] text-[#8a7360]">
+                          Google Maps dùng vị trí hiện tại của máy
+                        </p>
+                      </div>
+                      <div className="flex rounded-lg bg-white/70 p-0.5 dark:bg-black/10">
+                        <button
+                          onClick={() => setPreferredTravelMode("two-wheeler")}
+                          className={`rounded-md px-2 py-1.5 text-[11px] font-bold ${travelMode === "two-wheeler" ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
+                        >
+                          <Bike className="mr-1 inline" size={13} /> Xe máy
+                        </button>
+                        <button
+                          onClick={() => setPreferredTravelMode("driving")}
+                          className={`rounded-md px-2 py-1.5 text-[11px] font-bold ${travelMode === "driving" ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
+                        >
+                          <CarFront className="mr-1 inline" size={13} /> Ô tô
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] leading-relaxed text-[#8a7360]">
+                      “Đường đi” là ước tính theo dữ liệu đường OSM, không gồm kẹt xe. Quán có pin cần xem xét chỉ hiện khoảng cách thẳng.
+                    </p>
+                  </>
+                )}
                 {!position && wards.length > 0 && (
                   <select
                     value={ward}
@@ -1285,11 +1465,13 @@ export default function Home() {
                 {loading ? (
                   <Loading />
                 ) : nearby.length ? (
-                  nearby.map(({ item, distance }) => (
+                  nearby.map(({ item, airDistance, roadRoute }) => (
                     <RestaurantCard
                       key={item.id}
                       restaurant={item}
-                      distance={distance}
+                      airDistance={airDistance}
+                      roadRoute={roadRoute}
+                      travelMode={travelMode}
                       onOpen={() => setSelected(item)}
                     />
                   ))
@@ -1329,31 +1511,53 @@ export default function Home() {
             </div>
           )}
           {tab === "profile" && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Stat
-                label="Đã đến"
-                value={visited.length}
-                detail={`trên ${restaurants.length} quán`}
-                tone="text-[#a35e2d]"
-              />
-              <Stat
-                label="Muốn đến"
-                value={restaurants.length - visited.length}
-                detail="đã lưu để thử"
-                tone="text-[#402c1e] dark:text-[#f7eadc]"
-              />
-              <Stat
-                label="Ngon"
-                value={good.length}
-                detail="quán bạn muốn nhớ"
-                tone="text-emerald-700 dark:text-emerald-300"
-              />
-              <Stat
-                label="Không ngon"
-                value={bad.length}
-                detail="để tránh lần sau"
-                tone="text-red-700 dark:text-red-300"
-              />
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Stat
+                  label="Đã đến"
+                  value={visited.length}
+                  detail={`trên ${restaurants.length} quán`}
+                  tone="text-[#a35e2d]"
+                />
+                <Stat
+                  label="Muốn đến"
+                  value={restaurants.length - visited.length}
+                  detail="đã lưu để thử"
+                  tone="text-[#402c1e] dark:text-[#f7eadc]"
+                />
+                <Stat
+                  label="Ngon"
+                  value={good.length}
+                  detail="quán bạn muốn nhớ"
+                  tone="text-emerald-700 dark:text-emerald-300"
+                />
+                <Stat
+                  label="Không ngon"
+                  value={bad.length}
+                  detail="để tránh lần sau"
+                  tone="text-red-700 dark:text-red-300"
+                />
+              </div>
+              <section className="glass rounded-[20px] p-4">
+                <p className="text-sm font-extrabold">Chỉ đường mặc định</p>
+                <p className="mt-1 text-xs text-[#8a7360]">
+                  Dùng khi mở Google Maps; lựa chọn được lưu trên thiết bị này.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <Chip
+                    active={travelMode === "two-wheeler"}
+                    onClick={() => setPreferredTravelMode("two-wheeler")}
+                  >
+                    <Bike className="mr-1 inline" size={14} /> Xe máy
+                  </Chip>
+                  <Chip
+                    active={travelMode === "driving"}
+                    onClick={() => setPreferredTravelMode("driving")}
+                  >
+                    <CarFront className="mr-1 inline" size={14} /> Ô tô
+                  </Chip>
+                </div>
+              </section>
             </div>
           )}
           {tab === "report" && (
@@ -1392,6 +1596,7 @@ export default function Home() {
           onTaste={(taste) =>
             updateRestaurant(selected, { taste_rating: taste })
           }
+          travelMode={travelMode}
         />
       )}
       {formTarget !== undefined && (
