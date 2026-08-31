@@ -889,7 +889,7 @@ function ReportView({
   );
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm font-bold">Tổng quan vị trí</p>
           <p className="mt-1 max-w-xl text-sm leading-relaxed text-[#8a7360]">
@@ -897,7 +897,7 @@ function ReportView({
             không dùng tọa độ cho chỉ đường.
           </p>
         </div>
-        <div className="relative">
+        <div className="relative self-end sm:self-auto">
           <button
             onClick={() => setDownloadOpen((value) => !value)}
             className="inline-flex items-center gap-2 rounded-xl bg-[#402c1e] px-4 py-2.5 text-sm font-extrabold text-[#fbf3ea]"
