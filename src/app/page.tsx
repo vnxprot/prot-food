@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { PwaRegister } from "@/components/pwa-register";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import type { Restaurant, RestaurantDraft, Status } from "@/lib/types";
+import type { Restaurant, RestaurantDraft, Status, Ward } from "@/lib/types";
 import {
   directionsUrl,
   formatDistance,
@@ -52,6 +52,13 @@ type Tab = "nearby" | "list" | "profile" | "report";
 type FilterStatus = "all" | Status;
 type Position = { lat: number; lng: number };
 type RoadRoute = { distanceKm: number };
+type GeocodeResult = {
+  lat: number;
+  lng: number;
+  formattedAddress?: string;
+  wardName?: string | null;
+  confidence?: "high" | "low";
+};
 type RouteCache = {
   savedAt: number;
   routes: Record<string, RoadRoute>;
@@ -83,6 +90,7 @@ function isRouteEligible(restaurant: Restaurant) {
 const emptyDraft = (): RestaurantDraft => ({
   name: "",
   address_raw: "",
+  category: "",
   notes: "",
   status: "muon_den",
   taste_rating: "",
@@ -91,6 +99,7 @@ const emptyDraft = (): RestaurantDraft => ({
 const toDraft = (restaurant: Restaurant): RestaurantDraft => ({
   name: restaurant.name,
   address_raw: restaurant.address_raw || "",
+  category: restaurant.category || "",
   notes: restaurant.notes || "",
   status: restaurant.status,
   taste_rating:
@@ -104,7 +113,53 @@ const toDraft = (restaurant: Restaurant): RestaurantDraft => ({
       : "",
 });
 const inputClass =
-  "w-full rounded-xl border border-[#402c1e]/15 bg-white/60 px-3 py-2.5 text-[14px] text-[#402c1e] outline-none placeholder:text-[#8a7360] focus:border-[#a35e2d] dark:border-[#f7eadc]/15 dark:bg-[#1c130d]/40 dark:text-[#f7eadc]";
+  "w-full rounded-xl border border-[#402c1e]/15 bg-white/60 px-3 py-2.5 text-base text-[#402c1e] outline-none placeholder:text-[#8a7360] focus:border-[#a35e2d] dark:border-[#f7eadc]/15 dark:bg-[#1c130d]/40 dark:text-[#f7eadc] md:text-[14px]";
+
+const normalizeWardKey = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/đ/g, "d")
+    .replace(/^(phuong|xa)\s+/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+function findWard(wardName: string | null, wards: Ward[]) {
+  if (!wardName) return null;
+  const key = normalizeWardKey(wardName);
+  return (
+    wards.find(
+      (ward) =>
+        normalizeWardKey(ward.name) === key ||
+        ward.old_names?.some((name) => normalizeWardKey(name) === key),
+    ) || null
+  );
+}
+
+function addressAlreadyIncludesWard(address: string, ward?: string) {
+  return ward
+    ? normalizeWardKey(address).includes(normalizeWardKey(ward))
+    : false;
+}
+
+function useSwipeLeft(onSwipe: () => void) {
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  return {
+    onTouchStart: (event: React.TouchEvent) => {
+      const touch = event.changedTouches[0];
+      touchStart.current = { x: touch.clientX, y: touch.clientY };
+    },
+    onTouchEnd: (event: React.TouchEvent) => {
+      if (!touchStart.current) return;
+      const touch = event.changedTouches[0];
+      const deltaX = touch.clientX - touchStart.current.x;
+      const deltaY = Math.abs(touch.clientY - touchStart.current.y);
+      touchStart.current = null;
+      if (deltaX < -72 && deltaY < 64) onSwipe();
+    },
+  };
+}
 
 function StatusBadge({ status }: { status: Status }) {
   const done = status === "da_den";
@@ -206,9 +261,11 @@ function RestaurantCard({
             {restaurant.name}
           </h2>
           {restaurant.address_raw && (
-            <p className="mt-1 truncate text-[13px] text-[#6b5644] dark:text-[#cbb4a0]">
+            <p className="mt-1 text-[13px] leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
               {restaurant.address_raw}
-              {ward && ` · ${ward}`}
+              {ward &&
+                !addressAlreadyIncludesWard(restaurant.address_raw, ward) &&
+                ` · ${ward}`}
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -293,11 +350,15 @@ function similarRestaurants(
 function RestaurantForm({
   restaurant,
   restaurants,
+  categories,
+  adminWards,
   onClose,
   onSaved,
 }: {
   restaurant: Restaurant | null;
   restaurants: Restaurant[];
+  categories: string[];
+  adminWards: Ward[];
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -307,6 +368,7 @@ function RestaurantForm({
   const [advanced, setAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const swipeHandlers = useSwipeLeft(onClose);
   const candidates = useMemo(
     () => similarRestaurants(draft, restaurants, restaurant?.id),
     [draft, restaurants, restaurant?.id],
@@ -322,27 +384,65 @@ function RestaurantForm({
         "Chưa có kết nối Supabase. Hãy thêm biến môi trường trước khi lưu.",
       );
     if (!draft.name.trim()) return setError("Tên quán là mục bắt buộc.");
+    if (!draft.category) return setError("Hãy chọn nhóm món.");
     const coordinates = draft.coordinates
       .trim()
       .match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
+    const addressChanged =
+      draft.address_raw.trim() !== (restaurant?.address_raw || "").trim();
+    const shouldGeocode = Boolean(
+      !coordinates &&
+        draft.address_raw.trim() &&
+        (!restaurant || addressChanged || restaurant.lat == null || restaurant.lng == null),
+    );
+    setSaving(true);
+    setError(null);
+    let geocoded: GeocodeResult | null = null;
+    if (shouldGeocode) {
+      try {
+        const response = await fetch(
+          `/api/geocode?name=${encodeURIComponent(draft.name)}&address=${encodeURIComponent(draft.address_raw)}`,
+        );
+        const body = (await response.json()) as {
+          result?: GeocodeResult | null;
+        };
+        geocoded = body.result || null;
+      } catch {
+        geocoded = null;
+      }
+    }
+    const matchedWard = findWard(geocoded?.wardName || null, adminWards);
     const payload = {
       name: draft.name.trim(),
-      address_raw: draft.address_raw.trim() || null,
+      address_raw:
+        geocoded?.formattedAddress || draft.address_raw.trim() || null,
+      category: draft.category || null,
       notes: draft.notes.trim() || null,
       status: draft.status,
       taste_rating:
         draft.status === "da_den" ? draft.taste_rating || null : null,
-      lat: coordinates ? Number(coordinates[1]) : (restaurant?.lat ?? null),
-      lng: coordinates ? Number(coordinates[2]) : (restaurant?.lng ?? null),
+      lat: coordinates
+        ? Number(coordinates[1])
+        : geocoded?.lat ?? (shouldGeocode ? null : (restaurant?.lat ?? null)),
+      lng: coordinates
+        ? Number(coordinates[2])
+        : geocoded?.lng ?? (shouldGeocode ? null : (restaurant?.lng ?? null)),
       geocode_source: coordinates
         ? "manual"
-        : restaurant?.geocode_source || "unset",
+        : geocoded
+          ? "nominatim"
+          : shouldGeocode
+            ? "unset"
+            : restaurant?.geocode_source || "unset",
       geocode_confidence: coordinates
         ? "manual"
-        : restaurant?.geocode_confidence || "low",
+        : geocoded?.confidence ||
+          (shouldGeocode ? "low" : restaurant?.geocode_confidence || "low"),
+      ward_id: coordinates
+        ? restaurant?.ward_id || null
+        : matchedWard?.id ||
+          (shouldGeocode ? null : restaurant?.ward_id || null),
     };
-    setSaving(true);
-    setError(null);
     const query = restaurant
       ? supabase
           .from("restaurants")
@@ -351,38 +451,23 @@ function RestaurantForm({
           .select()
           .single()
       : supabase.from("restaurants").insert(payload).select().single();
-    const { data, error: saveError } = await query;
+    const { error: saveError } = await query;
     if (saveError) {
       setError(saveError.message);
       setSaving(false);
       return;
-    }
-    if (!coordinates && !restaurant && draft.address_raw.trim()) {
-      try {
-        const response = await fetch(
-          `/api/geocode?name=${encodeURIComponent(draft.name)}&address=${encodeURIComponent(draft.address_raw)}`,
-        );
-        const { result } = await response.json();
-        if (result)
-          await supabase
-            .from("restaurants")
-            .update({
-              lat: result.lat,
-              lng: result.lng,
-              geocode_source: "nominatim",
-              geocode_confidence: "low",
-            })
-            .eq("id", data.id);
-      } catch {}
     }
     await onSaved();
     setSaving(false);
     onClose();
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c130d]/35 p-0 backdrop-blur-sm md:items-center md:p-6">
-      <div className="max-h-[92dvh] w-full max-w-xl overflow-y-auto rounded-t-[28px] bg-[#fbf3ea] p-5 shadow-2xl dark:bg-[#281b13] md:rounded-[20px]">
-        <div className="mb-5 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-[#1c130d]/35 p-0 backdrop-blur-sm md:items-center md:p-6">
+      <div
+        {...swipeHandlers}
+        className="h-[100dvh] max-h-[100dvh] w-full max-w-xl touch-pan-y overflow-y-auto overscroll-contain bg-[#fbf3ea] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-2xl dark:bg-[#281b13] md:h-auto md:max-h-[92dvh] md:rounded-[20px] md:p-5"
+      >
+        <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-4 flex items-center justify-between border-b border-[#402c1e]/8 bg-[#fbf3ea]/95 px-4 pb-3 pt-[calc(1rem+env(safe-area-inset-top))] backdrop-blur-xl dark:bg-[#281b13]/95 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:backdrop-blur-none">
           <div>
             <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">
               PROT FOOD
@@ -431,8 +516,23 @@ function RestaurantForm({
               placeholder="Số nhà, đường, Hà Nội"
             />
             <p className="mt-1 text-[11px] text-[#8a7360]">
-              Có thể để trống và bổ sung sau.
+              Sau khi lưu, app sẽ chuẩn hoá địa chỉ và tự gắn phường khi dữ liệu OSM xác định được.
             </p>
+          </Field>
+          <Field label="Nhóm món *">
+            <select
+              required
+              value={draft.category}
+              onChange={(event) => set("category", event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Chọn nhóm món</option>
+              {categories.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label="Ghi chú">
             <textarea
@@ -542,6 +642,7 @@ function Detail({
   travelMode: TravelMode;
 }) {
   const [updating, setUpdating] = useState(false);
+  const swipeHandlers = useSwipeLeft(onClose);
   const update = async (task: () => Promise<void>) => {
     setUpdating(true);
     await task();
@@ -549,7 +650,10 @@ function Detail({
   };
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-[#1c130d]/30 backdrop-blur-sm">
-      <aside className="h-full w-full max-w-xl overflow-y-auto bg-[#fbf3ea] px-5 py-6 shadow-2xl dark:bg-[#281b13]">
+      <aside
+        {...swipeHandlers}
+        className="h-full w-full max-w-xl touch-pan-y overflow-y-auto bg-[#fbf3ea] px-5 py-6 shadow-2xl dark:bg-[#281b13]"
+      >
         <div className="mb-6 flex items-center justify-between">
           <button
             onClick={onClose}
@@ -594,7 +698,12 @@ function Detail({
           <p className="flex items-start gap-2 text-sm leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
             <MapPin size={18} className="mt-0.5 shrink-0 text-[#a35e2d]" />
             {restaurant.address_raw || "Chưa có địa chỉ"}
-            {restaurant.admin_wards && (
+            {restaurant.admin_wards &&
+              restaurant.address_raw &&
+              !addressAlreadyIncludesWard(
+                restaurant.address_raw,
+                restaurant.admin_wards.name,
+              ) && (
               <>
                 <br />
                 {restaurant.admin_wards.name}
@@ -983,6 +1092,7 @@ function ReportView({
 export default function Home() {
   const [tab, setTab] = useState<Tab>("nearby");
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [adminWards, setAdminWards] = useState<Ward[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
@@ -1019,15 +1129,22 @@ export default function Home() {
       return;
     }
     setLoading(true);
-    const { data, error } = await supabase
-      .from("restaurants")
-      .select("*, admin_wards(*)")
-      .order("created_at", { ascending: false });
-    if (error) setLoadError(`Không thể kết nối dữ liệu (${error.message}). Hãy thử tải lại.`);
+    const [restaurantResult, wardResult] = await Promise.all([
+      supabase
+        .from("restaurants")
+        .select("*, admin_wards(*)")
+        .order("created_at", { ascending: false }),
+      supabase.from("admin_wards").select("*").order("name"),
+    ]);
+    if (restaurantResult.error)
+      setLoadError(
+        `Không thể kết nối dữ liệu (${restaurantResult.error.message}). Hãy thử tải lại.`,
+      );
     else {
-      setRestaurants(data as Restaurant[]);
+      setRestaurants(restaurantResult.data as Restaurant[]);
       setLoadError(null);
     }
+    if (!wardResult.error) setAdminWards(wardResult.data as Ward[]);
     setLoading(false);
   }
   useEffect(() => {
@@ -1661,6 +1778,8 @@ export default function Home() {
         <RestaurantForm
           restaurant={formTarget}
           restaurants={restaurants}
+          categories={categories}
+          adminWards={adminWards}
           onClose={() => setFormTarget(undefined)}
           onSaved={afterSave}
         />

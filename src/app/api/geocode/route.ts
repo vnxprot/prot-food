@@ -1,6 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 
-type NominatimResult = { lat: string; lon: string; display_name: string };
+type NominatimAddress = {
+  house_number?: string;
+  road?: string;
+  pedestrian?: string;
+  residential?: string;
+  neighbourhood?: string;
+  quarter?: string;
+  suburb?: string;
+  village?: string;
+  town?: string;
+  city?: string;
+  state?: string;
+  country_code?: string;
+};
+
+type NominatimResult = {
+  lat: string;
+  lon: string;
+  display_name: string;
+  address?: NominatimAddress;
+};
+
+const normalized = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+function formatHanoiAddress(input: string, address?: NominatimAddress) {
+  const base = input
+    .replace(/,?\s*(hà nội|ha noi)(,?\s*việt nam)?\s*$/i, "")
+    .trim()
+    .replace(/,+$/, "");
+  const ward =
+    address?.suburb ||
+    address?.quarter ||
+    address?.neighbourhood ||
+    address?.village;
+  const parts = [base];
+  if (ward && !normalized(base).includes(normalized(ward))) parts.push(ward);
+  parts.push("Hà Nội");
+  return parts.filter(Boolean).join(", ");
+}
 
 async function searchNominatim(query: string) {
   const endpoint = new URL("https://nominatim.openstreetmap.org/search");
@@ -35,15 +80,32 @@ export async function GET(request: NextRequest) {
     for (let index = 0; index < queries.length; index += 1) {
       if (index > 0) await new Promise((resolve) => setTimeout(resolve, 1100));
       const match = (await searchNominatim(queries[index]))[0];
-      if (match)
+      if (match) {
+        const addressDetails = match.address;
+        const wardName =
+          addressDetails?.suburb ||
+          addressDetails?.quarter ||
+          addressDetails?.neighbourhood ||
+          addressDetails?.village ||
+          null;
+        const isHanoi = normalized(
+          [addressDetails?.city, addressDetails?.state, match.display_name]
+            .filter(Boolean)
+            .join(" "),
+        ).includes("ha noi");
         return NextResponse.json({
           result: {
             lat: Number(match.lat),
             lng: Number(match.lon),
             displayName: match.display_name,
+            formattedAddress: formatHanoiAddress(address, addressDetails),
+            wardName,
+            confidence:
+              isHanoi && addressDetails?.house_number ? "high" : "low",
             query: queries[index],
           },
         });
+      }
     }
     return NextResponse.json({ result: null, reason: "not_found" });
   } catch (error) {

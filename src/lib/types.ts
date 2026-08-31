@@ -51,6 +51,7 @@ export type ReviewQueueItem = {
 export type RestaurantDraft = {
   name: string;
   address_raw: string;
+  category: string;
   notes: string;
   status: Status;
   taste_rating: "ngon" | "khong_ngon" | "";
