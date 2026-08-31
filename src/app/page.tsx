@@ -143,20 +143,39 @@ function addressAlreadyIncludesWard(address: string, ward?: string) {
     : false;
 }
 
-function useSwipeLeft(onSwipe: () => void) {
+function useSwipeToClose(onSwipe: () => void) {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const begin = (x: number, y: number) => {
+    touchStart.current = { x, y };
+  };
+  const finish = (x: number, y: number) => {
+    if (!touchStart.current) return;
+    const deltaX = x - touchStart.current.x;
+    const deltaY = Math.abs(y - touchStart.current.y);
+    touchStart.current = null;
+    // Either horizontal direction is accepted. This keeps the requested
+    // left-swipe behavior while also matching iOS users' right-swipe habit.
+    if (Math.abs(deltaX) >= 64 && deltaY < 72) onSwipe();
+  };
   return {
+    onPointerDown: (event: React.PointerEvent) => {
+      if (event.pointerType === "touch") begin(event.clientX, event.clientY);
+    },
+    onPointerUp: (event: React.PointerEvent) => {
+      if (event.pointerType === "touch") finish(event.clientX, event.clientY);
+    },
+    onPointerCancel: () => {
+      touchStart.current = null;
+    },
     onTouchStart: (event: React.TouchEvent) => {
+      if ("PointerEvent" in window) return;
       const touch = event.changedTouches[0];
-      touchStart.current = { x: touch.clientX, y: touch.clientY };
+      begin(touch.clientX, touch.clientY);
     },
     onTouchEnd: (event: React.TouchEvent) => {
-      if (!touchStart.current) return;
+      if ("PointerEvent" in window) return;
       const touch = event.changedTouches[0];
-      const deltaX = touch.clientX - touchStart.current.x;
-      const deltaY = Math.abs(touch.clientY - touchStart.current.y);
-      touchStart.current = null;
-      if (deltaX < -72 && deltaY < 64) onSwipe();
+      finish(touch.clientX, touch.clientY);
     },
   };
 }
@@ -368,7 +387,7 @@ function RestaurantForm({
   const [advanced, setAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const swipeHandlers = useSwipeLeft(onClose);
+  const swipeHandlers = useSwipeToClose(onClose);
   const candidates = useMemo(
     () => similarRestaurants(draft, restaurants, restaurant?.id),
     [draft, restaurants, restaurant?.id],
@@ -469,6 +488,9 @@ function RestaurantForm({
       >
         <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-4 flex items-center justify-between border-b border-[#402c1e]/8 bg-[#fbf3ea]/95 px-4 pb-3 pt-[calc(1rem+env(safe-area-inset-top))] backdrop-blur-xl dark:bg-[#281b13]/95 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:backdrop-blur-none">
           <div>
+            <p className="mb-1 text-[10px] font-bold text-[#8a7360] md:hidden">
+              Vuốt ngang để quay lại
+            </p>
             <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">
               PROT FOOD
             </p>
@@ -642,7 +664,7 @@ function Detail({
   travelMode: TravelMode;
 }) {
   const [updating, setUpdating] = useState(false);
-  const swipeHandlers = useSwipeLeft(onClose);
+  const swipeHandlers = useSwipeToClose(onClose);
   const update = async (task: () => Promise<void>) => {
     setUpdating(true);
     await task();
@@ -679,6 +701,9 @@ function Detail({
             </button>
           </div>
         </div>
+        <p className="mb-3 text-[10px] font-bold text-[#8a7360] md:hidden">
+          Vuốt ngang để quay lại
+        </p>
         <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">
           CHI TIẾT QUÁN
         </p>
