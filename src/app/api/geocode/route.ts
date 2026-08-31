@@ -31,6 +31,49 @@ const normalized = (value: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
+const HANOI_BOUNDS = {
+  south: 20.56,
+  north: 21.39,
+  west: 105.28,
+  east: 106.05,
+};
+
+function isInsideHanoi(lat: number, lng: number) {
+  return (
+    lat >= HANOI_BOUNDS.south &&
+    lat <= HANOI_BOUNDS.north &&
+    lng >= HANOI_BOUNDS.west &&
+    lng <= HANOI_BOUNDS.east
+  );
+}
+
+function streetMatchesInput(input: string, address?: NominatimAddress) {
+  const resultStreet = normalized(
+    address?.road || address?.pedestrian || address?.residential || "",
+  );
+  if (!resultStreet) return false;
+  const ignored = new Set([
+    "so",
+    "duong",
+    "pho",
+    "ngo",
+    "ngach",
+    "ha",
+    "noi",
+    "viet",
+    "nam",
+  ]);
+  const inputTokens = normalized(input)
+    .split(" ")
+    .filter((token) => !/^\d/.test(token) && !ignored.has(token));
+  const streetTokens = new Set(
+    resultStreet.split(" ").filter((token) => !ignored.has(token)),
+  );
+  if (!inputTokens.length) return false;
+  const matched = inputTokens.filter((token) => streetTokens.has(token)).length;
+  return matched / inputTokens.length >= 0.6;
+}
+
 function formatHanoiAddress(input: string, address?: NominatimAddress) {
   const base = input
     .replace(/,?\s*(hà nội|ha noi)(,?\s*việt nam)?\s*$/i, "")
@@ -50,9 +93,11 @@ function formatHanoiAddress(input: string, address?: NominatimAddress) {
 async function searchNominatim(query: string) {
   const endpoint = new URL("https://nominatim.openstreetmap.org/search");
   endpoint.searchParams.set("format", "jsonv2");
-  endpoint.searchParams.set("limit", "1");
+  endpoint.searchParams.set("limit", "5");
   endpoint.searchParams.set("countrycodes", "vn");
   endpoint.searchParams.set("addressdetails", "1");
+  endpoint.searchParams.set("viewbox", "105.28,21.39,106.05,20.56");
+  endpoint.searchParams.set("bounded", "1");
   endpoint.searchParams.set("q", query);
   const response = await fetch(endpoint, {
     headers: {
@@ -79,29 +124,46 @@ export async function GET(request: NextRequest) {
   try {
     for (let index = 0; index < queries.length; index += 1) {
       if (index > 0) await new Promise((resolve) => setTimeout(resolve, 1100));
-      const match = (await searchNominatim(queries[index]))[0];
-      if (match) {
+      const matches = await searchNominatim(queries[index]);
+      for (const match of matches) {
         const addressDetails = match.address;
+        const lat = Number(match.lat);
+        const lng = Number(match.lon);
         const wardName =
           addressDetails?.suburb ||
           addressDetails?.quarter ||
           addressDetails?.neighbourhood ||
           addressDetails?.village ||
           null;
-        const isHanoi = normalized(
+        const isHanoiText = normalized(
           [addressDetails?.city, addressDetails?.state, match.display_name]
             .filter(Boolean)
             .join(" "),
         ).includes("ha noi");
+        if (
+          !Number.isFinite(lat) ||
+          !Number.isFinite(lng) ||
+          !isInsideHanoi(lat, lng) ||
+          !isHanoiText ||
+          !streetMatchesInput(address, addressDetails)
+        )
+          continue;
+        const inputHouseNumber = address.match(
+          /^\s*(\d+[a-zA-Z]?(?:[/-]\d+)*)/,
+        )?.[1];
         return NextResponse.json({
           result: {
-            lat: Number(match.lat),
-            lng: Number(match.lon),
+            lat,
+            lng,
             displayName: match.display_name,
             formattedAddress: formatHanoiAddress(address, addressDetails),
             wardName,
             confidence:
-              isHanoi && addressDetails?.house_number ? "high" : "low",
+              inputHouseNumber &&
+              normalized(addressDetails?.house_number || "") ===
+                normalized(inputHouseNumber)
+                ? "high"
+                : "low",
             query: queries[index],
           },
         });
