@@ -1994,7 +1994,7 @@ export default function Home() {
     { id: "nearby" as const, label: "Gần đây", icon: Compass },
     { id: "list" as const, label: "Danh sách", icon: List },
     { id: "roulette" as const, label: collections.length && selectedCollectionIds.length && selectedCollectionIds.every((id) => collections.find((item) => item.id === id)?.type === "cafe") ? "Uống gì?" : "Ăn gì?", icon: Dices },
-    { id: "profile" as const, label: "Cá nhân", icon: UserRound },
+    { id: "profile" as const, label: "Cài đặt", icon: UserRound },
   ];
   const pageTitle =
     tab === "nearby"
@@ -2004,7 +2004,7 @@ export default function Home() {
         : tab === "roulette"
           ? collections.length && selectedCollectionIds.length && selectedCollectionIds.every((id) => collections.find((item) => item.id === id)?.type === "cafe") ? "Hôm nay uống gì?" : "Hôm nay ăn gì?"
         : tab === "profile"
-          ? "Cá nhân"
+          ? "Cài đặt"
           : "";
   const pageSubtitle =
     tab === "nearby"
@@ -2014,7 +2014,7 @@ export default function Home() {
         : tab === "roulette"
           ? "Một gợi ý hợp thời điểm, hợp vị trí"
         : tab === "profile"
-          ? "Danh sách ăn uống của bạn"
+          ? "Quyền truy cập, nguồn dữ liệu và tùy chọn thiết bị"
           : "";
   return (
     <main className="app-background min-h-screen">
@@ -2063,7 +2063,6 @@ export default function Home() {
             </h1>
             <p className="mt-1 text-sm text-[#8a7360]">{pageSubtitle}</p>
           </header>
-          <CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} />
           {!isSupabaseConfigured && (
             <div className="mb-5 flex gap-3 rounded-2xl border border-[#e5a36a]/60 bg-[#e5a36a]/18 p-4 text-sm text-[#70421f]">
               <CircleAlert className="mt-0.5 shrink-0" size={18} />
@@ -2223,6 +2222,17 @@ export default function Home() {
           )}
           {tab === "profile" && (
             <div className="space-y-4">
+              <section className={`rounded-[20px] border p-4 ${isAdmin ? "border-[#a35e2d]/45 bg-[#a35e2d]/12" : "border-[#402c1e]/12 bg-white/45 dark:bg-black/10"}`}>
+                <p className="text-sm font-extrabold">{isAdmin ? "👑 Bạn đang là Admin Prot" : "👀 Bạn đang ở chế độ Viewer"}</p>
+                <p className="mt-1 text-xs leading-relaxed text-[#8a7360]">{isAdmin ? "Bạn có thể thêm quán, sửa/xóa dữ liệu và nạp nguồn Excel hoặc Google Sheets. Các nút quản trị đang hiện trên ứng dụng." : "Bạn có thể tìm, xem chỉ đường và quay Roulette. Các nút thêm, sửa, xóa và nạp dữ liệu được ẩn hoàn toàn."}</p>
+                <button type="button" onClick={isAdmin ? signOutAdmin : signInAsAdmin} className="mt-3 rounded-xl bg-[#402c1e] px-3 py-2 text-xs font-bold text-white">{isAdmin ? "Đăng xuất Admin" : "Gửi Magic Link tới vnxprot@gmail.com"}</button>
+                {!isAdmin && <p className="mt-2 text-[11px] text-[#8a7360]">Mở email vnxprot@gmail.com, bấm link đăng nhập, rồi quay lại đây để thấy huy hiệu Admin.</p>}
+              </section>
+              <section className="glass rounded-[20px] p-4">
+                <p className="text-sm font-extrabold">Nguồn dữ liệu đang xem</p>
+                <p className="mt-1 text-xs text-[#8a7360]">Lựa chọn này chỉ lưu trên thiết bị của bạn và áp dụng cho Gần đây, Danh sách và Roulette. Bấm đúp một nguồn để chỉ xem nguồn đó.</p>
+                <div className="mt-3"><CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} /></div>
+              </section>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Stat
                   label="Đã đến"
@@ -2268,11 +2278,6 @@ export default function Home() {
                     <CarFront className="mr-1 inline" size={14} /> Ô tô
                   </Chip>
                 </div>
-              </section>
-              <section className="glass rounded-[20px] p-4">
-                <p className="text-sm font-extrabold">{isAdmin ? "👑 Admin Prot" : "Quản trị viên"}</p>
-                <p className="mt-1 text-xs text-[#8a7360]">{isAdmin ? "Bạn có quyền thêm, sửa, xóa và nạp nguồn dữ liệu." : "Chỉ tài khoản vnxprot@gmail.com có quyền thay đổi dữ liệu."}</p>
-                <button type="button" onClick={isAdmin ? signOutAdmin : signInAsAdmin} className="mt-3 rounded-xl bg-[#402c1e] px-3 py-2 text-xs font-bold text-white">{isAdmin ? "Đăng xuất" : "Đăng nhập quản trị"}</button>
               </section>
               <FoodFootprint restaurants={restaurants} onOpen={setSelected} />
               <details className="glass rounded-[20px] p-4">
