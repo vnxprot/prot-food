@@ -165,6 +165,22 @@ const normalizeWardKey = (value: string) =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
+const normalizeSearchText = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("vi")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+function matchesSearchQuery(values: Array<string | null | undefined>, query: string) {
+  const tokens = normalizeSearchText(query).split(" ").filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = normalizeSearchText(values.filter(Boolean).join(" "));
+  return tokens.every((token) => haystack.includes(token));
+}
+
 function findWard(wardName: string | null, wards: Ward[]) {
   if (!wardName) return null;
   const key = normalizeWardKey(wardName);
@@ -190,9 +206,8 @@ function displayWardName(ward: Ward | null | undefined) {
   return `${prefix} ${bareName}`;
 }
 
-function wardForRestaurant(restaurant: Restaurant, wards: Ward[]) {
-  if (restaurant.admin_wards) return restaurant.admin_wards;
-  const address = normalizeWardKey(restaurant.address_raw || "");
+function findWardFromAddress(addressRaw: string | null | undefined, wards: Ward[]) {
+  const address = normalizeWardKey(addressRaw || "");
   if (!address) return null;
   return wards.find((candidate) =>
     [candidate.name, ...(candidate.old_names || [])].some((name) => {
@@ -200,6 +215,10 @@ function wardForRestaurant(restaurant: Restaurant, wards: Ward[]) {
       return alias.length >= 3 && address.includes(alias);
     }),
   ) || null;
+}
+
+function wardForRestaurant(restaurant: Restaurant, wards: Ward[]) {
+  return restaurant.admin_wards || findWardFromAddress(restaurant.address_raw, wards);
 }
 
 function useSwipeToClose(onSwipe: () => void) {
@@ -608,7 +627,12 @@ function RestaurantForm({
         geocoded = null;
       }
     }
-    const matchedWard = findWard(geocoded?.wardName || null, adminWards);
+    const matchedWard =
+      findWard(geocoded?.wardName || null, adminWards) ||
+      findWardFromAddress(
+        [draft.address_raw, geocoded?.formattedAddress].filter(Boolean).join(", "),
+        adminWards,
+      );
     const payload = {
       name: draft.name.trim(),
       address_raw:
@@ -635,10 +659,9 @@ function RestaurantForm({
         ? "manual"
         : geocoded?.confidence ||
           (shouldGeocode ? "low" : restaurant?.geocode_confidence || "low"),
-      ward_id: coordinates
-        ? restaurant?.ward_id || null
-        : matchedWard?.id ||
-          (shouldGeocode ? null : restaurant?.ward_id || null),
+      ward_id:
+        matchedWard?.id ||
+        (shouldGeocode ? null : restaurant?.ward_id || null),
     };
     const query = restaurant
       ? supabase
@@ -1385,6 +1408,19 @@ export default function Home() {
     setToast(message);
     window.setTimeout(() => setToast(null), 3200);
   };
+  const switchTab = (nextTab: Tab) => {
+    if (nextTab === tab) return;
+    setSearch("");
+    setSearchQuery("");
+    setStatus("all");
+    setCategory("all");
+    setCategoryFilterSearch("");
+    setShowAllCategories(false);
+    setWard("all");
+    setQuickFilter("all");
+    setWardPickerOpen(false);
+    setTab(nextTab);
+  };
   const setPreferredTravelMode = (mode: TravelMode) => {
     setTravelMode(mode);
     window.localStorage.setItem("prot-food-travel-mode", mode);
@@ -1429,6 +1465,10 @@ export default function Home() {
       setTravelMode(savedMode);
   }, []);
   useEffect(() => {
+    if (!search) {
+      setSearchQuery("");
+      return;
+    }
     const timer = window.setTimeout(() => setSearchQuery(search), 250);
     return () => clearTimeout(timer);
   }, [search]);
@@ -1469,9 +1509,9 @@ export default function Home() {
     [restaurants],
   );
   const visibleCategories = useMemo(() => {
-    const query = categoryFilterSearch.trim().toLocaleLowerCase("vi");
+    const query = normalizeSearchText(categoryFilterSearch);
     const matching = query
-      ? categories.filter((value) => value.toLocaleLowerCase("vi").includes(query))
+      ? categories.filter((value) => normalizeSearchText(value).includes(query))
       : categories;
     const limited = showAllCategories || query ? matching : matching.slice(0, 8);
     if (category !== "all" && !limited.includes(category)) return [category, ...limited];
@@ -1480,25 +1520,25 @@ export default function Home() {
   const filtered = useMemo(
     () =>
       restaurants.filter((item) => {
-        const q = searchQuery.trim().toLocaleLowerCase("vi");
-        const haystack = [
-          item.name,
-          item.address_raw,
-          item.notes,
-          item.shop_note,
-          item.admin_wards?.name,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLocaleLowerCase("vi");
+        const resolvedWard = wardForRestaurant(item, adminWards);
         return (
-          (!q || haystack.includes(q)) &&
+          matchesSearchQuery(
+            [
+              item.name,
+              item.address_raw,
+              item.notes,
+              item.shop_note,
+              resolvedWard?.name,
+              displayWardName(resolvedWard),
+            ],
+            searchQuery,
+          ) &&
           (status === "all" || item.status === status) &&
           (category === "all" || item.category === category) &&
-          (ward === "all" || item.admin_wards?.name === ward)
+          (ward === "all" || resolvedWard?.name === ward)
         );
       }),
-    [restaurants, searchQuery, status, category, ward],
+    [restaurants, adminWards, searchQuery, status, category, ward],
   );
   const contextFiltered = useMemo(
     () =>
@@ -1682,12 +1722,12 @@ export default function Home() {
   const wardOptions = useMemo(() => {
     const counts = new Map<string, number>();
     restaurants.forEach((item) => {
-      const name = item.admin_wards?.name;
+      const name = wardForRestaurant(item, adminWards)?.name;
       if (name) counts.set(name, (counts.get(name) || 0) + 1);
     });
     return Array.from(counts, ([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [restaurants]);
+  }, [restaurants, adminWards]);
   async function updateRestaurant(
     restaurant: Restaurant,
     update: Record<string, unknown>,
@@ -1780,10 +1820,27 @@ export default function Home() {
           <Search size={14} className="shrink-0 text-[#a35e2d]" />
           <input
             value={categoryFilterSearch}
-            onChange={(event) => setCategoryFilterSearch(event.target.value)}
+            onChange={(event) => {
+              const next = event.target.value;
+              if (!next && categoryFilterSearch) setCategory("all");
+              setCategoryFilterSearch(next);
+            }}
             placeholder="Tìm nhóm món…"
-            className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-[#8a7360]"
+            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[#8a7360] md:text-xs"
           />
+          {(categoryFilterSearch || category !== "all") && (
+            <button
+              type="button"
+              onClick={() => {
+                setCategoryFilterSearch("");
+                setCategory("all");
+              }}
+              className="rounded-full p-1 text-[#8a7360]"
+              aria-label="Xóa tìm kiếm và bộ lọc nhóm món"
+            >
+              <X size={15} />
+            </button>
+          )}
         </label>
         {categories.length > 8 && (
           <button
@@ -1867,7 +1924,7 @@ export default function Home() {
             {navItems.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setTab(item.id)}
+                onClick={() => switchTab(item.id)}
                 className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold ${tab === item.id ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
               >
                 <item.icon size={19} />
@@ -2018,8 +2075,21 @@ export default function Home() {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Tìm quán, địa chỉ, ghi chú…"
-                  className="w-full bg-transparent text-sm outline-none placeholder:text-[#8a7360]"
+                  className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[#8a7360] md:text-sm"
                 />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch("");
+                      setSearchQuery("");
+                    }}
+                    className="rounded-full p-1 text-[#8a7360]"
+                    aria-label="Xóa tìm kiếm quán"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               </div>
               {filterRow(true)}
               <div className="mt-4">
@@ -2117,7 +2187,7 @@ export default function Home() {
         {navItems.slice(0, 2).map((item) => (
           <button
             key={item.id}
-            onClick={() => setTab(item.id)}
+            onClick={() => switchTab(item.id)}
             className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold ${tab === item.id ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
           >
             <item.icon size={18} />
@@ -2135,7 +2205,7 @@ export default function Home() {
         {navItems.slice(2).map((item) => (
           <button
             key={item.id}
-            onClick={() => setTab(item.id)}
+            onClick={() => switchTab(item.id)}
             className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold ${tab === item.id ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
           >
             <item.icon size={18} />

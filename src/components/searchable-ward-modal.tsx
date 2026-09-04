@@ -33,6 +33,15 @@ function useModalBodyLock(enabled: boolean) {
 
 export type WardOption = { name: string; count: number };
 
+const normalizeSearch = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("vi")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
 export function SearchableWardModal({
   open,
   wards,
@@ -48,20 +57,24 @@ export function SearchableWardModal({
 }) {
   useModalBodyLock(open);
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (open) setQuery("");
+  }, [open]);
   const visibleWards = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase("vi");
+    const normalized = normalizeSearch(query);
     return normalized
-      ? wards.filter((ward) => ward.name.toLocaleLowerCase("vi").includes(normalized))
+      ? wards.filter((ward) => normalizeSearch(ward.name).includes(normalized))
       : wards;
   }, [query, wards]);
   if (!open) return null;
   const choose = (next: string) => {
+    setQuery("");
     onChange(next);
     onClose();
   };
   return (
     <div className="fixed inset-0 z-[60] flex max-w-[100vw] items-end overflow-hidden bg-[#140e0a]/45 p-0 backdrop-blur-sm md:items-center md:justify-center md:p-6">
-      <section className="glass max-h-[92dvh] w-full max-w-lg overflow-hidden rounded-t-[28px] px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-[#281b13]/92 md:rounded-[28px] md:pb-5">
+      <section className="glass flex h-[78dvh] max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-[#281b13]/92 md:h-[680px] md:rounded-[28px] md:pb-5">
         <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#402c1e]/20 dark:bg-white/20 md:hidden" />
         <div className="mb-4 flex items-center justify-between">
           <div>
@@ -77,10 +90,27 @@ export function SearchableWardModal({
           <input
             autoFocus
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#8a7360]"
+            onChange={(event) => {
+              const next = event.target.value;
+              if (!next && query) onChange("all");
+              setQuery(next);
+            }}
+            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[#8a7360] md:text-sm"
             placeholder="Gõ tên phường hoặc xã…"
           />
+          {(query || value !== "all") && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                onChange("all");
+              }}
+              className="rounded-full p-1 text-[#8a7360]"
+              aria-label="Xóa tìm kiếm và bộ lọc phường"
+            >
+              <X size={16} />
+            </button>
+          )}
         </label>
         <button
           type="button"
@@ -90,7 +120,7 @@ export function SearchableWardModal({
           Tất cả địa bàn có quán
           <span className="text-xs opacity-75">{wards.reduce((sum, ward) => sum + ward.count, 0)} quán</span>
         </button>
-        <div className="mt-2 max-h-[48dvh] min-w-0 divide-y divide-[#402c1e]/8 overflow-y-auto overscroll-contain">
+        <div className="mt-2 min-h-0 min-w-0 flex-1 divide-y divide-[#402c1e]/8 overflow-y-auto overscroll-contain">
           {visibleWards.map((ward) => (
             <button
               type="button"

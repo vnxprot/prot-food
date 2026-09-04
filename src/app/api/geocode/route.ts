@@ -12,6 +12,8 @@ type NominatimAddress = {
   village?: string;
   town?: string;
   city?: string;
+  city_district?: string;
+  district?: string;
   state?: string;
   country_code?: string;
 };
@@ -87,6 +89,38 @@ function streetMatchesInput(input: string, address?: NominatimAddress) {
   return matched / inputTokens.length >= 0.6;
 }
 
+function localityMatchesInput(input: string, address?: NominatimAddress) {
+  const locality = normalized(
+    [
+      address?.neighbourhood,
+      address?.quarter,
+      address?.suburb,
+      address?.village,
+      address?.town,
+      address?.city_district,
+      address?.district,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  if (!locality) return false;
+  const tokens = normalized(input)
+    .split(" ")
+    .filter((token) => token.length > 1 && !/^\d/.test(token));
+  return tokens.some((token) => locality.split(" ").includes(token));
+}
+
+function relaxedStreetAddress(input: string) {
+  return input
+    .replace(
+      /^\s*(?:(?:số|nhà)\s*)?\d+[a-zA-Z]?(?:[/-]\d+)*\s*(?:(?:ngõ|ngách|hẻm)\s*\d+[a-zA-Z]?(?:[/-]\d+)*\s*)*/iu,
+      "",
+    )
+    .replace(/^\s*(?:đường|phố)\s+/iu, "")
+    .trim()
+    .replace(/,+$/, "");
+}
+
 function formatHanoiAddress(input: string, address?: NominatimAddress) {
   const base = input
     .replace(/,?\s*(hà nội|ha noi)(,?\s*việt nam)?\s*$/i, "")
@@ -145,10 +179,17 @@ export async function GET(request: NextRequest) {
   }
 
   // Street + house number is more reliable than an arbitrary venue name in OSM POI data.
+  const relaxedAddress = relaxedStreetAddress(address);
   const queries = [
     `${address}, Hà Nội, Việt Nam`,
     name ? `${name}, ${address}, Hà Nội, Việt Nam` : null,
-  ].filter(Boolean) as string[];
+    relaxedAddress && relaxedAddress !== address
+      ? `${relaxedAddress}, Hà Nội, Việt Nam`
+      : null,
+    relaxedAddress && relaxedAddress !== address
+      ? `Đường ${relaxedAddress}, Hà Nội, Việt Nam`
+      : null,
+  ].filter((query, index, all): query is string => Boolean(query) && all.indexOf(query) === index);
 
   try {
     for (let index = 0; index < queries.length; index += 1) {
@@ -174,7 +215,10 @@ export async function GET(request: NextRequest) {
           !Number.isFinite(lng) ||
           !isInsideHanoi(lat, lng) ||
           !isHanoiText ||
-          !streetMatchesInput(address, addressDetails)
+          !(
+            streetMatchesInput(address, addressDetails) ||
+            localityMatchesInput(relaxedAddress || address, addressDetails)
+          )
         )
           continue;
         const inputHouseNumber = address.match(
