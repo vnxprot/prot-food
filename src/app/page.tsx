@@ -1503,19 +1503,35 @@ export default function Home() {
   }, []);
   useEffect(() => {
     const stored = window.localStorage.getItem("prot-food-collections-v1");
-    if (stored) try { setSelectedCollectionIds(JSON.parse(stored)); } catch { /* Ignore invalid local storage. */ }
-    if (!supabase) return;
-    supabase.auth.getUser().then(({ data }) => setIsAdmin(data.user?.email?.toLowerCase() === "vnxprot@gmail.com"));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setIsAdmin(session?.user.email?.toLowerCase() === "vnxprot@gmail.com"));
-    return () => listener.subscription.unsubscribe();
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) setSelectedCollectionIds(parsed);
+      } catch {
+        /* Ignore invalid local storage. */
+      }
+    }
+    const params = new URLSearchParams(window.location.search);
+    const adminParam = params.get("admin");
+    if (window.localStorage.getItem("prot-food-admin-v1") === "1") setIsAdmin(true);
+    if (adminParam) void loginWithPin(adminParam, true);
   }, []);
-  const chooseCollections = (ids: string[]) => { setSelectedCollectionIds(ids); window.localStorage.setItem("prot-food-collections-v1", JSON.stringify(ids)); };
-  const signInAsAdmin = async () => {
-    if (!supabase) return notify("Supabase chưa được cấu hình.");
-    const { error } = await supabase.auth.signInWithOtp({ email: "vnxprot@gmail.com", options: { emailRedirectTo: window.location.origin } });
-    notify(error ? error.message : "Đã gửi magic link tới vnxprot@gmail.com.");
+  const chooseCollections = (ids: string[]) => {
+    setSelectedCollectionIds(ids);
+    window.localStorage.setItem("prot-food-collections-v1", JSON.stringify(ids));
   };
-  const signOutAdmin = async () => { await supabase?.auth.signOut(); setIsAdmin(false); notify("Đã đăng xuất quản trị."); };
+  const loginWithPin = async (inputPin?: string, fromBookmark = false) => {
+    const pin = inputPin || window.prompt("Nhập mã PIN Quản trị viên (6 số):");
+    if (!pin) return;
+    const response = await fetch("/api/admin/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) });
+    if (response.ok) { setIsAdmin(true); window.localStorage.setItem("prot-food-admin-v1", "1"); notify(fromBookmark ? "Đã kích hoạt Admin từ bookmark." : "Đã mở khóa quyền Admin thành công!"); }
+    else notify("Mã PIN không chính xác hoặc chưa cấu hình.");
+  };
+  const signOutAdmin = async () => {
+    window.localStorage.removeItem("prot-food-admin-v1");
+    setIsAdmin(false);
+    notify("Đã đăng xuất quản trị.");
+  };
   useEffect(() => {
     if (!navigator.clipboard?.readText) return;
     navigator.clipboard
@@ -2225,8 +2241,8 @@ export default function Home() {
               <section className={`rounded-[20px] border p-4 ${isAdmin ? "border-[#a35e2d]/45 bg-[#a35e2d]/12" : "border-[#402c1e]/12 bg-white/45 dark:bg-black/10"}`}>
                 <p className="text-sm font-extrabold">{isAdmin ? "👑 Bạn đang là Admin Prot" : "👀 Bạn đang ở chế độ Viewer"}</p>
                 <p className="mt-1 text-xs leading-relaxed text-[#8a7360]">{isAdmin ? "Bạn có thể thêm quán, sửa/xóa dữ liệu và nạp nguồn Excel hoặc Google Sheets. Các nút quản trị đang hiện trên ứng dụng." : "Bạn có thể tìm, xem chỉ đường và quay Roulette. Các nút thêm, sửa, xóa và nạp dữ liệu được ẩn hoàn toàn."}</p>
-                <button type="button" onClick={isAdmin ? signOutAdmin : signInAsAdmin} className="mt-3 rounded-xl bg-[#402c1e] px-3 py-2 text-xs font-bold text-white">{isAdmin ? "Đăng xuất Admin" : "Gửi Magic Link tới vnxprot@gmail.com"}</button>
-                {!isAdmin && <p className="mt-2 text-[11px] text-[#8a7360]">Mở email vnxprot@gmail.com, bấm link đăng nhập, rồi quay lại đây để thấy huy hiệu Admin.</p>}
+                <button type="button" onClick={isAdmin ? signOutAdmin : () => void loginWithPin()} className="mt-3 rounded-xl bg-[#402c1e] px-3 py-2 text-xs font-bold text-white">{isAdmin ? "Đăng xuất Admin" : "Nhập PIN 6 số để mở khóa"}</button>
+                {!isAdmin && <p className="mt-2 text-[11px] text-[#8a7360]">Có thể lưu bookmark dạng `?admin=PIN` để tự kích hoạt Admin khi mở link.</p>}
               </section>
               <section className="glass rounded-[20px] p-4">
                 <p className="text-sm font-extrabold">Nguồn dữ liệu đang xem</p>
