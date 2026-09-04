@@ -206,6 +206,15 @@ function displayWardName(ward: Ward | null | undefined) {
   return `${prefix} ${bareName}`;
 }
 
+function displayAddress(address: string, wardName?: string | null) {
+  if (!wardName) return address;
+  return address
+    .replace(/,?\s*(?:hà nội|ha noi|việt nam|viet nam)\b/giu, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s*,\s*$/g, "")
+    .trim();
+}
+
 function findWardFromAddress(addressRaw: string | null | undefined, wards: Ward[]) {
   const address = normalizeWardKey(addressRaw || "");
   if (!address) return null;
@@ -421,21 +430,24 @@ function RestaurantCard({
   ward?: Ward | null;
 }) {
   const wardName = displayWardName(ward || restaurant.admin_wards);
+  const addressLabel = restaurant.address_raw
+    ? displayAddress(restaurant.address_raw, wardName)
+    : null;
   return (
-    <article className="glass animate-rise mb-3 rounded-[22px] p-4 transition hover:-translate-y-0.5">
+    <article className="glass animate-rise mb-3 rounded-[22px] p-4 pt-5 transition hover:-translate-y-0.5">
       <button
         onClick={onOpen}
         className="flex w-full items-start gap-3 text-left"
       >
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[18px] font-bold leading-tight text-[#402c1e] dark:text-[#f7eadc]">
+          <h2 className="truncate text-[18px] font-bold leading-snug text-[#402c1e] dark:text-[#f7eadc]">
             {restaurant.name}
           </h2>
-          {restaurant.address_raw && (
+          {addressLabel && (
             <p className="mt-1 text-[13px] leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
-              {restaurant.address_raw}
+              {addressLabel}
               {wardName &&
-                !addressAlreadyIncludesWard(restaurant.address_raw, wardName) &&
+                !addressAlreadyIncludesWard(addressLabel, wardName) &&
                 ` · ${wardName}`}
             </p>
           )}
@@ -894,6 +906,9 @@ function Detail({
   const sheetDismissHandlers = useBottomSheetDismiss(onClose);
   useModalBodyLock();
   const detailWardName = displayWardName(ward || restaurant.admin_wards);
+  const detailAddress = restaurant.address_raw
+    ? displayAddress(restaurant.address_raw, detailWardName)
+    : null;
   useEffect(() => {
     if (!supabase) return;
     supabase
@@ -969,11 +984,11 @@ function Detail({
         <div className="glass mt-6 rounded-[20px] p-4">
           <p className="flex items-start gap-2 text-sm leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
             <MapPin size={18} className="mt-0.5 shrink-0 text-[#a35e2d]" />
-            {restaurant.address_raw || "Chưa có địa chỉ"}
+            {detailAddress || "Chưa có địa chỉ"}
             {detailWardName &&
-              restaurant.address_raw &&
+              detailAddress &&
               !addressAlreadyIncludesWard(
-                restaurant.address_raw,
+                detailAddress,
                 detailWardName,
               ) && (
               <>
@@ -1713,7 +1728,15 @@ export default function Home() {
           airDistance,
           estimatedDistance,
           roadRoute: position ? roadRoutes[item.id] : undefined,
-        })),
+        }))
+        .sort(
+          (a, b) =>
+            (a.roadRoute?.distanceKm ?? a.estimatedDistance ?? Infinity) -
+              (b.roadRoute?.distanceKm ?? b.estimatedDistance ?? Infinity) ||
+            (a.estimatedDistance ?? Infinity) -
+              (b.estimatedDistance ?? Infinity) ||
+            a.item.id.localeCompare(b.item.id),
+        ),
     [nearbyByAir, position, roadRoutes],
   );
   const visited = restaurants.filter((item) => item.status === "da_den");
