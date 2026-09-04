@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bike,
+  Bird,
   CarFront,
   Check,
   ChevronDown,
@@ -463,11 +464,11 @@ function RestaurantCard({
               {formatDistance(roadRoute.distanceKm)}
             </span>
             <span className="mt-1 block text-[10px] font-bold leading-none opacity-90">
-              {roadRoute.isEstimated ? "ước tính" : "đường bộ"}
+              {roadRoute.isEstimated ? "ước tính" : ""}
             </span>
             {airDistance != null && (
-              <span className="mt-1.5 block text-[9px] font-medium leading-none opacity-80">
-                ↗ {formatDistance(airDistance)} thẳng
+              <span className="mt-1.5 flex items-center justify-center gap-1 text-[9px] font-medium leading-none opacity-80">
+                <Bird size={10} /> {formatDistance(airDistance)}
               </span>
             )}
           </div>
@@ -480,8 +481,8 @@ function RestaurantCard({
               ước tính
             </span>
             {airDistance != null && (
-              <span className="mt-1.5 block text-[9px] font-medium leading-none opacity-65">
-                ↗ {formatDistance(airDistance)} thẳng
+              <span className="mt-1.5 flex items-center justify-center gap-1 text-[9px] font-medium leading-none opacity-65">
+                <Bird size={10} /> {formatDistance(airDistance)}
               </span>
             )}
           </div>
@@ -889,6 +890,7 @@ function Detail({
   onDelete,
   onStatus,
   onTaste,
+  onClearVisits,
   travelMode,
   ward,
 }: {
@@ -898,6 +900,7 @@ function Detail({
   onDelete: () => void;
   onStatus: (status: Status) => Promise<void>;
   onTaste: (taste: "ngon" | "khong_ngon" | null) => Promise<void>;
+  onClearVisits: () => Promise<boolean>;
   travelMode: TravelMode;
   ward?: Ward | null;
 }) {
@@ -922,6 +925,12 @@ function Detail({
   const update = async (task: () => Promise<void>) => {
     setUpdating(true);
     await task();
+    setUpdating(false);
+  };
+  const clearVisitHistory = async () => {
+    if (!visits.length || !window.confirm(`Xóa toàn bộ ${visits.length} lần check-in của “${restaurant.name}”?`)) return;
+    setUpdating(true);
+    if (await onClearVisits()) setVisits([]);
     setUpdating(false);
   };
   return (
@@ -1064,7 +1073,18 @@ function Detail({
           </section>
         )}
         <section className="mt-7">
-          <SectionTitle>Lịch sử ghé quán</SectionTitle>
+          <div className="flex items-center justify-between">
+            <SectionTitle>Lịch sử ghé quán</SectionTitle>
+            {visits.length > 0 && (
+              <button
+                type="button"
+                onClick={clearVisitHistory}
+                className="mb-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-red-800/75 hover:bg-red-900/8 dark:text-red-200/80"
+              >
+                <Trash2 size={13} /> Xóa lịch sử
+              </button>
+            )}
+          </div>
           <div className="overflow-hidden rounded-2xl border border-[#402c1e]/8 bg-white/35 dark:bg-black/10">
             {visits.length ? visits.map((visit) => (
               <div key={visit.id} className="flex items-center justify-between border-b border-[#402c1e]/8 px-3 py-3 last:border-0">
@@ -1801,6 +1821,42 @@ export default function Home() {
     }
     setQuickLoggingId(null);
   }
+  async function clearVisitHistory(restaurant: Restaurant) {
+    if (!supabase) return false;
+    const { error: deleteError } = await supabase
+      .from("visit_logs")
+      .delete()
+      .eq("restaurant_id", restaurant.id);
+    if (deleteError) {
+      notify(deleteError.message);
+      return false;
+    }
+    const { error: resetError } = await supabase
+      .from("restaurants")
+      .update({
+        status: "muon_den",
+        last_visited_at: null,
+        visit_count: 0,
+        taste_rating: null,
+        price_level: null,
+      })
+      .eq("id", restaurant.id);
+    if (resetError) {
+      notify(resetError.message);
+      return false;
+    }
+    await refresh();
+    setSelected({
+      ...restaurant,
+      status: "muon_den",
+      last_visited_at: null,
+      visit_count: 0,
+      taste_rating: null,
+      price_level: null,
+    });
+    notify("Đã xóa lịch sử check-in.");
+    return true;
+  }
   async function afterSave() {
     await refresh();
     notify("Đã lưu quán.");
@@ -2246,6 +2302,7 @@ export default function Home() {
           onTaste={(taste) =>
             updateRestaurant(selected, { taste_rating: taste })
           }
+          onClearVisits={() => clearVisitHistory(selected)}
           travelMode={travelMode}
           ward={wardForRestaurant(selected, adminWards)}
         />
