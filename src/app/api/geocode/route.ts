@@ -110,6 +110,10 @@ function localityMatchesInput(input: string, address?: NominatimAddress) {
   return tokens.some((token) => locality.split(" ").includes(token));
 }
 
+function hasStreetDetails(address?: NominatimAddress) {
+  return Boolean(address?.road || address?.pedestrian || address?.residential);
+}
+
 function relaxedStreetAddress(input: string) {
   return input
     .replace(
@@ -217,7 +221,8 @@ export async function GET(request: NextRequest) {
           !isHanoiText ||
           !(
             streetMatchesInput(address, addressDetails) ||
-            localityMatchesInput(relaxedAddress || address, addressDetails)
+            (!hasStreetDetails(addressDetails) &&
+              localityMatchesInput(relaxedAddress || address, addressDetails))
           )
         )
           continue;
