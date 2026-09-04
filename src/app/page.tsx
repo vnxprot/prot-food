@@ -38,13 +38,15 @@ import { PwaRegister } from "@/components/pwa-register";
 import { CategoryBadge } from "@/components/category-badge";
 import { FoodFootprint } from "@/components/food-footprint";
 import { FoodRoulette } from "@/components/food-roulette";
+import { CollectionPicker } from "@/components/collection-picker";
+import { CollectionImportModal } from "@/components/collection-import-modal";
 import { QuickContextFilter, type QuickContext } from "@/components/quick-context-filter";
 import { SearchableWardModal, type WardOption } from "@/components/searchable-ward-modal";
 import { SkeletonCard } from "@/components/skeleton-card";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { smartEstimatedDistanceKm } from "@/lib/hanoi-obstacles";
 import { decodePlusCode, extractPlusCode } from "@/lib/plus-codes";
-import type { Restaurant, RestaurantDraft, Status, VisitLog, Ward } from "@/lib/types";
+import type { Collection, Restaurant, RestaurantDraft, Status, VisitLog, Ward } from "@/lib/types";
 import {
   directionsUrl,
   formatDistance,
@@ -893,6 +895,7 @@ function Detail({
   onClearVisits,
   travelMode,
   ward,
+  isAdmin,
 }: {
   restaurant: Restaurant;
   onClose: () => void;
@@ -903,6 +906,7 @@ function Detail({
   onClearVisits: () => Promise<boolean>;
   travelMode: TravelMode;
   ward?: Ward | null;
+  isAdmin: boolean;
 }) {
   const [updating, setUpdating] = useState(false);
   const [visits, setVisits] = useState<VisitLog[]>([]);
@@ -955,7 +959,7 @@ function Detail({
             <ChevronLeft size={18} />
             Quay lại
           </button>
-          <div className="flex gap-2">
+          {isAdmin && <div className="flex gap-2">
             <button
               onClick={onEdit}
               className="rounded-xl bg-[#402c1e]/8 p-2.5"
@@ -970,7 +974,7 @@ function Detail({
             >
               <Trash2 size={17} />
             </button>
-          </div>
+          </div>}
         </div>
         <p className="mb-3 text-[10px] font-bold text-[#8a7360] md:hidden">
           Kéo thanh phía trên xuống để đóng
@@ -1410,6 +1414,10 @@ function ReportView({
 export default function Home() {
   const [tab, setTab] = useState<Tab>("nearby");
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [adminWards, setAdminWards] = useState<Ward[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1466,12 +1474,13 @@ export default function Home() {
       return;
     }
     setLoading(true);
-    const [restaurantResult, wardResult] = await Promise.all([
+    const [restaurantResult, wardResult, collectionResult] = await Promise.all([
       supabase
         .from("restaurants")
         .select("*, admin_wards(*)")
         .order("created_at", { ascending: false }),
       supabase.from("admin_wards").select("*").order("name"),
+      supabase.from("collections").select("*").order("sort_order"),
     ]);
     if (restaurantResult.error)
       setLoadError(
@@ -1482,11 +1491,31 @@ export default function Home() {
       setLoadError(null);
     }
     if (!wardResult.error) setAdminWards(wardResult.data as Ward[]);
+    if (!collectionResult.error) {
+      const nextCollections = collectionResult.data as Collection[];
+      setCollections(nextCollections);
+      setSelectedCollectionIds((current) => current.length ? current.filter((id) => nextCollections.some((item) => item.id === id)) : nextCollections.map((item) => item.id));
+    }
     setLoading(false);
   }
   useEffect(() => {
     refresh();
   }, []);
+  useEffect(() => {
+    const stored = window.localStorage.getItem("prot-food-collections-v1");
+    if (stored) try { setSelectedCollectionIds(JSON.parse(stored)); } catch { /* Ignore invalid local storage. */ }
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data }) => setIsAdmin(data.user?.email?.toLowerCase() === "vnxprot@gmail.com"));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => setIsAdmin(session?.user.email?.toLowerCase() === "vnxprot@gmail.com"));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+  const chooseCollections = (ids: string[]) => { setSelectedCollectionIds(ids); window.localStorage.setItem("prot-food-collections-v1", JSON.stringify(ids)); };
+  const signInAsAdmin = async () => {
+    if (!supabase) return notify("Supabase chưa được cấu hình.");
+    const { error } = await supabase.auth.signInWithOtp({ email: "vnxprot@gmail.com", options: { emailRedirectTo: window.location.origin } });
+    notify(error ? error.message : "Đã gửi magic link tới vnxprot@gmail.com.");
+  };
+  const signOutAdmin = async () => { await supabase?.auth.signOut(); setIsAdmin(false); notify("Đã đăng xuất quản trị."); };
   useEffect(() => {
     if (!navigator.clipboard?.readText) return;
     navigator.clipboard
@@ -1557,6 +1586,7 @@ export default function Home() {
       restaurants.filter((item) => {
         const resolvedWard = wardForRestaurant(item, adminWards);
         return (
+          (selectedCollectionIds.length === 0 || selectedCollectionIds.includes(item.collection_id || "prot_food")) &&
           matchesSearchQuery(
             [
               item.name,
@@ -1573,7 +1603,7 @@ export default function Home() {
           (ward === "all" || resolvedWard?.name === ward)
         );
       }),
-    [restaurants, adminWards, searchQuery, status, category, ward],
+    [restaurants, adminWards, selectedCollectionIds, searchQuery, status, category, ward],
   );
   const contextFiltered = useMemo(
     () =>
@@ -1963,7 +1993,7 @@ export default function Home() {
   const navItems = [
     { id: "nearby" as const, label: "Gần đây", icon: Compass },
     { id: "list" as const, label: "Danh sách", icon: List },
-    { id: "roulette" as const, label: "Ăn gì?", icon: Dices },
+    { id: "roulette" as const, label: collections.length && selectedCollectionIds.length && selectedCollectionIds.every((id) => collections.find((item) => item.id === id)?.type === "cafe") ? "Uống gì?" : "Ăn gì?", icon: Dices },
     { id: "profile" as const, label: "Cá nhân", icon: UserRound },
   ];
   const pageTitle =
@@ -1972,7 +2002,7 @@ export default function Home() {
       : tab === "list"
         ? "Danh sách"
         : tab === "roulette"
-          ? "Hôm nay ăn gì?"
+          ? collections.length && selectedCollectionIds.length && selectedCollectionIds.every((id) => collections.find((item) => item.id === id)?.type === "cafe") ? "Hôm nay uống gì?" : "Hôm nay ăn gì?"
         : tab === "profile"
           ? "Cá nhân"
           : "";
@@ -2011,28 +2041,29 @@ export default function Home() {
               </button>
             ))}
           </nav>
-          <button
-            type="button"
-            onClick={() => setFormTarget(null)}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#a35e2d] px-3 py-3 text-sm font-extrabold text-white shadow-lg shadow-[#a35e2d]/20"
-          >
-            <Plus size={18} />
-            Thêm quán mới
-          </button>
+          {isAdmin && <button
+              type="button"
+              onClick={() => setFormTarget(null)}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#a35e2d] px-3 py-3 text-sm font-extrabold text-white shadow-lg shadow-[#a35e2d]/20"
+            >
+              <Plus size={18} />
+              Thêm quán mới
+            </button>}
           <p className="mt-auto px-3 text-xs leading-relaxed text-[#8a7360]">
-            PWA cá nhân · không có bản đồ trong app.<br />v3.1.0
+            PWA cá nhân · không có bản đồ trong app.<br />v3.2.0
           </p>
         </aside>
         <section className="min-w-0 flex-1 px-4 pb-28 pt-6 sm:px-6 md:px-10 md:pb-10">
           <header className="mb-5">
             <p className="text-[11px] font-extrabold tracking-[0.18em] text-[#a35e2d] md:hidden">
-              PROT FOOD · v3.1.0
+              PROT FOOD · v3.2.0
             </p>
             <h1 className="mt-1 text-3xl font-extrabold tracking-tight">
               {pageTitle}
             </h1>
             <p className="mt-1 text-sm text-[#8a7360]">{pageSubtitle}</p>
           </header>
+          <CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} />
           {!isSupabaseConfigured && (
             <div className="mb-5 flex gap-3 rounded-2xl border border-[#e5a36a]/60 bg-[#e5a36a]/18 p-4 text-sm text-[#70421f]">
               <CircleAlert className="mt-0.5 shrink-0" size={18} />
@@ -2238,6 +2269,11 @@ export default function Home() {
                   </Chip>
                 </div>
               </section>
+              <section className="glass rounded-[20px] p-4">
+                <p className="text-sm font-extrabold">{isAdmin ? "👑 Admin Prot" : "Quản trị viên"}</p>
+                <p className="mt-1 text-xs text-[#8a7360]">{isAdmin ? "Bạn có quyền thêm, sửa, xóa và nạp nguồn dữ liệu." : "Chỉ tài khoản vnxprot@gmail.com có quyền thay đổi dữ liệu."}</p>
+                <button type="button" onClick={isAdmin ? signOutAdmin : signInAsAdmin} className="mt-3 rounded-xl bg-[#402c1e] px-3 py-2 text-xs font-bold text-white">{isAdmin ? "Đăng xuất" : "Đăng nhập quản trị"}</button>
+              </section>
               <FoodFootprint restaurants={restaurants} onOpen={setSelected} />
               <details className="glass rounded-[20px] p-4">
                 <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold"><FileCheck2 size={17} className="text-[#a35e2d]" />Báo cáo chất lượng tọa độ & xuất dữ liệu</summary>
@@ -2247,7 +2283,7 @@ export default function Home() {
           )}
           {tab === "roulette" && (
             <FoodRoulette
-              restaurants={restaurants}
+              restaurants={filtered}
               position={position}
               travelMode={travelMode}
               onOpen={setSelected}
@@ -2255,14 +2291,14 @@ export default function Home() {
           )}
         </section>
       </div>
-      <button
+      {isAdmin && <button
           onClick={() => setFormTarget(null)}
           className="fixed bottom-7 right-8 z-30 hidden h-14 w-14 items-center justify-center rounded-full bg-[#a35e2d] text-white shadow-lg shadow-[#a35e2d]/35 transition hover:scale-105 active:scale-95 md:flex"
           aria-label="Thêm quán"
         >
           <Plus size={26} strokeWidth={2.7} />
-        </button>
-      <nav className="glass fixed inset-x-3 bottom-3 z-20 mx-auto grid max-w-md grid-cols-5 items-end rounded-[24px] px-1 pb-[calc(.45rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
+        </button>}
+      <nav className={`glass fixed inset-x-3 bottom-3 z-20 mx-auto grid max-w-md ${isAdmin ? "grid-cols-5" : "grid-cols-4"} items-end rounded-[24px] px-1 pb-[calc(.45rem+env(safe-area-inset-bottom))] pt-2 md:hidden`}>
         {navItems.slice(0, 2).map((item) => (
           <button
             key={item.id}
@@ -2273,14 +2309,14 @@ export default function Home() {
             {item.label}
           </button>
         ))}
-        <button
+        {isAdmin && <button
           type="button"
           onClick={() => setFormTarget(null)}
           className="-mt-8 justify-self-center rounded-full border-4 border-[#fbf3ea] bg-[#a35e2d] p-3 text-white shadow-lg shadow-[#a35e2d]/35 dark:border-[#140e0a]"
           aria-label="Thêm quán mới"
         >
           <Plus size={23} strokeWidth={3} />
-        </button>
+        </button>}
         {navItems.slice(2).map((item) => (
           <button
             key={item.id}
@@ -2305,6 +2341,7 @@ export default function Home() {
           onClearVisits={() => clearVisitHistory(selected)}
           travelMode={travelMode}
           ward={wardForRestaurant(selected, adminWards)}
+          isAdmin={isAdmin}
         />
       )}
       {formTarget !== undefined && (
@@ -2318,6 +2355,7 @@ export default function Home() {
           onSaved={afterSave}
         />
       )}
+      {importOpen && <CollectionImportModal onClose={() => setImportOpen(false)} onDone={refresh} />}
       {toast && (
         <div className="fixed bottom-24 left-1/2 z-[70] -translate-x-1/2 rounded-full bg-[#402c1e] px-4 py-2 text-sm font-bold text-[#fbf3ea] shadow-xl md:bottom-6">
           {toast}

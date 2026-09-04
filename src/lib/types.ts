@@ -4,6 +4,21 @@ export type PriceLevel = "re" | "binh_thuong" | "dat";
 export type GeocodeSource = "nominatim" | "plus_code" | "manual" | "unset";
 export type LocationVerification = "verified" | "unverified" | "closed";
 
+export type Collection = {
+  id: string;
+  name: string;
+  icon: string;
+  type: "food" | "cafe" | "all";
+  owner_name: string;
+  source_type: "manual" | "excel" | "google_sheets";
+  google_sheets_url?: string | null;
+  description?: string | null;
+  is_default?: boolean;
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type Ward = {
   id: string;
   name: string;
@@ -34,6 +49,7 @@ export type Restaurant = {
   next_review_at: string | null;
   created_at: string;
   updated_at: string;
+  collection_id?: string | null;
   admin_wards?: Ward | null;
 };
 
@@ -65,4 +81,5 @@ export type RestaurantDraft = {
   status: Status;
   taste_rating: "ngon" | "khong_ngon" | "";
   coordinates: string;
+  collection_id?: string | null;
 };
