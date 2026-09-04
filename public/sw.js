@@ -1,4 +1,4 @@
-const CACHE = "prot-food-v6";
+const CACHE = "prot-food-v8";
 const ASSETS = [
   "/",
   "/manifest.json",

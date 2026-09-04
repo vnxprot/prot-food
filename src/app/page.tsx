@@ -2,7 +2,6 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3,
   Bike,
   CarFront,
   Check,
@@ -11,7 +10,10 @@ import {
   ChevronRight,
   CircleAlert,
   Compass,
+  ClipboardPaste,
   Download,
+  Dices,
+  FileCheck2,
   FileSpreadsheet,
   FileText,
   FileType2,
@@ -32,8 +34,16 @@ import {
   X,
 } from "lucide-react";
 import { PwaRegister } from "@/components/pwa-register";
+import { CategoryBadge } from "@/components/category-badge";
+import { FoodFootprint } from "@/components/food-footprint";
+import { FoodRoulette } from "@/components/food-roulette";
+import { QuickContextFilter, type QuickContext } from "@/components/quick-context-filter";
+import { SearchableWardModal, type WardOption } from "@/components/searchable-ward-modal";
+import { SkeletonCard } from "@/components/skeleton-card";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import type { Restaurant, RestaurantDraft, Status, Ward } from "@/lib/types";
+import { smartEstimatedDistanceKm } from "@/lib/hanoi-obstacles";
+import { decodePlusCode, extractPlusCode } from "@/lib/plus-codes";
+import type { Restaurant, RestaurantDraft, Status, VisitLog, Ward } from "@/lib/types";
 import {
   directionsUrl,
   formatDistance,
@@ -48,16 +58,17 @@ import {
   makeLocationReport,
 } from "@/lib/report-export";
 
-type Tab = "nearby" | "list" | "profile" | "report";
+type Tab = "nearby" | "list" | "roulette" | "profile";
 type FilterStatus = "all" | Status;
 type Position = { lat: number; lng: number };
-type RoadRoute = { distanceKm: number };
+type RoadRoute = { distanceKm: number; isEstimated?: boolean };
 type GeocodeResult = {
   lat: number;
   lng: number;
   formattedAddress?: string;
   wardName?: string | null;
-  confidence?: "high" | "low";
+  confidence?: "high" | "medium" | "low";
+  source?: "nominatim" | "plus_code";
 };
 type RouteCache = {
   savedAt: number;
@@ -65,7 +76,7 @@ type RouteCache = {
 };
 
 const ROUTE_CACHE_MS = 10 * 60 * 1_000;
-const ROUTE_CANDIDATE_LIMIT = 12;
+const ROUTE_CANDIDATE_LIMIT = 25;
 // GPS updates can arrive several times per second while moving. Recalculate
 // routes only after a meaningful move, otherwise the routing service rate
 // limit would make the UI alternate between loading and fallback states.
@@ -75,14 +86,13 @@ const ROUTE_RECALCULATION_DEBOUNCE_MS = 2_500;
 function routeCacheKey(position: Position) {
   // Around 110m in Hanoi: accurate enough to cache without needlessly sharing
   // a new precise GPS coordinate as the user takes a few steps.
-  return `prot-food-route-v2:${position.lat.toFixed(3)}:${position.lng.toFixed(3)}`;
+  return `prot-food-route-v3.1:${position.lat.toFixed(3)}:${position.lng.toFixed(3)}`;
 }
 
 function isRouteEligible(restaurant: Restaurant) {
   return (
     restaurant.lat != null &&
     restaurant.lng != null &&
-    restaurant.geocode_confidence !== "low" &&
     restaurant.location_verification !== "closed"
   );
 }
@@ -96,6 +106,36 @@ const emptyDraft = (): RestaurantDraft => ({
   taste_rating: "",
   coordinates: "",
 });
+
+function clipboardAddressSuggestion(value: string) {
+  const text = value.trim();
+  if (!text) return null;
+  if (extractPlusCode(text)) return text;
+  const isMapsLink = /(?:google\.[^/]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(text);
+  const includesHanoi = /hà\s*nội|ha\s*noi/i.test(text);
+  if (!isMapsLink && !includesHanoi) return null;
+  if (isMapsLink) {
+    try {
+      const url = new URL(text);
+      const query = url.searchParams.get("q") || url.searchParams.get("query") || url.searchParams.get("destination");
+      if (query) return decodeURIComponent(query.replace(/\+/g, " "));
+      const placeMatch = url.pathname.match(/\/maps\/place\/([^/]+)/i);
+      if (placeMatch?.[1]) return decodeURIComponent(placeMatch[1].replace(/\+/g, " "));
+      return text;
+    } catch {
+      return text;
+    }
+  }
+  return text;
+}
+
+function clipboardCoordinates(value: string) {
+  const match = value.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);
+  if (match) return `${match[1]}, ${match[2]}`;
+  const plusCode = extractPlusCode(value);
+  const decoded = plusCode ? decodePlusCode(plusCode) : null;
+  return decoded ? `${decoded.lat}, ${decoded.lng}` : null;
+}
 const toDraft = (restaurant: Restaurant): RestaurantDraft => ({
   name: restaurant.name,
   address_raw: restaurant.address_raw || "",
@@ -143,6 +183,25 @@ function addressAlreadyIncludesWard(address: string, ward?: string) {
     : false;
 }
 
+function displayWardName(ward: Ward | null | undefined) {
+  if (!ward) return null;
+  const prefix = ward.type === "xa" ? "Xã" : "Phường";
+  const bareName = ward.name.replace(/^(phường|phuong|xã|xa)\s+/i, "").trim();
+  return `${prefix} ${bareName}`;
+}
+
+function wardForRestaurant(restaurant: Restaurant, wards: Ward[]) {
+  if (restaurant.admin_wards) return restaurant.admin_wards;
+  const address = normalizeWardKey(restaurant.address_raw || "");
+  if (!address) return null;
+  return wards.find((candidate) =>
+    [candidate.name, ...(candidate.old_names || [])].some((name) => {
+      const alias = normalizeWardKey(name);
+      return alias.length >= 3 && address.includes(alias);
+    }),
+  ) || null;
+}
+
 function useSwipeToClose(onSwipe: () => void) {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const begin = (x: number, y: number) => {
@@ -178,6 +237,74 @@ function useSwipeToClose(onSwipe: () => void) {
       finish(touch.clientX, touch.clientY);
     },
   };
+}
+
+function useBottomSheetDismiss(onDismiss: () => void) {
+  const startY = useRef<number | null>(null);
+  const dismissed = useRef(false);
+  const dismissIfDragged = (currentY: number) => {
+    if (dismissed.current || startY.current == null) return;
+    if (currentY - startY.current > 72) {
+      dismissed.current = true;
+      onDismiss();
+    }
+  };
+  return {
+    onPointerDown: (event: React.PointerEvent) => {
+      if (event.pointerType === "touch") {
+        startY.current = event.clientY;
+        dismissed.current = false;
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }
+    },
+    onPointerMove: (event: React.PointerEvent) => {
+      if (event.pointerType === "touch") dismissIfDragged(event.clientY);
+    },
+    onPointerUp: () => {
+      startY.current = null;
+      dismissed.current = false;
+    },
+    onPointerCancel: () => { startY.current = null; },
+    onTouchStart: (event: React.TouchEvent) => {
+      startY.current = event.touches[0]?.clientY ?? null;
+      dismissed.current = false;
+    },
+    onTouchMove: (event: React.TouchEvent) => {
+      const currentY = event.touches[0]?.clientY;
+      if (currentY != null) dismissIfDragged(currentY);
+    },
+    onTouchEnd: () => { startY.current = null; dismissed.current = false; },
+  };
+}
+
+function useModalBodyLock(enabled = true) {
+  useEffect(() => {
+    if (!enabled) return;
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const previous = {
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+      overflow: body.style.overflow,
+      overscroll: body.style.overscrollBehavior,
+    };
+    // Fixed-body locking also works on iOS Safari, where overflow:hidden on
+    // body alone still allows the document behind a bottom sheet to move.
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
+    return () => {
+      body.style.position = previous.position;
+      body.style.top = previous.top;
+      body.style.width = previous.width;
+      body.style.overflow = previous.overflow;
+      body.style.overscrollBehavior = previous.overscroll;
+      window.scrollTo(0, scrollY);
+    };
+  }, [enabled]);
 }
 
 function StatusBadge({ status }: { status: Status }) {
@@ -258,17 +385,23 @@ function TasteBadge({ taste }: { taste: Restaurant["taste_rating"] }) {
 function RestaurantCard({
   restaurant,
   airDistance,
+  estimatedDistance,
   roadRoute,
   travelMode = "two-wheeler",
   onOpen,
+  onQuickLog,
+  ward,
 }: {
   restaurant: Restaurant;
   airDistance?: number;
+  estimatedDistance?: number;
   roadRoute?: RoadRoute;
   travelMode?: TravelMode;
   onOpen: () => void;
+  onQuickLog?: () => void;
+  ward?: Ward | null;
 }) {
-  const ward = restaurant.admin_wards?.name;
+  const wardName = displayWardName(ward || restaurant.admin_wards);
   return (
     <article className="glass animate-rise mb-3 rounded-[22px] p-4 transition hover:-translate-y-0.5">
       <button
@@ -282,19 +415,15 @@ function RestaurantCard({
           {restaurant.address_raw && (
             <p className="mt-1 text-[13px] leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
               {restaurant.address_raw}
-              {ward &&
-                !addressAlreadyIncludesWard(restaurant.address_raw, ward) &&
-                ` · ${ward}`}
+              {wardName &&
+                !addressAlreadyIncludesWard(restaurant.address_raw, wardName) &&
+                ` · ${wardName}`}
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <StatusBadge status={restaurant.status} />
             <TasteBadge taste={restaurant.taste_rating} />
-            {restaurant.category && (
-              <span className="rounded-full bg-[#402c1e]/7 px-2.5 py-1 text-[11px] font-semibold text-[#402c1e] dark:bg-[#f7eadc]/10 dark:text-[#f7eadc]">
-                {restaurant.category}
-              </span>
-            )}
+            <CategoryBadge category={restaurant.category} />
           </div>
         </div>
         {roadRoute ? (
@@ -303,7 +432,7 @@ function RestaurantCard({
               {formatDistance(roadRoute.distanceKm)}
             </span>
             <span className="mt-1 block text-[10px] font-bold leading-none opacity-90">
-              đường bộ
+              {roadRoute.isEstimated ? "ước tính" : "đường bộ"}
             </span>
             {airDistance != null && (
               <span className="mt-1.5 block text-[9px] font-medium leading-none opacity-80">
@@ -311,29 +440,46 @@ function RestaurantCard({
               </span>
             )}
           </div>
-        ) : airDistance != null ? (
+        ) : estimatedDistance != null ? (
           <div className="min-w-[72px] rounded-2xl bg-[#402c1e]/7 px-2.5 py-2 text-center text-[#402c1e] dark:bg-[#f7eadc]/10 dark:text-[#f7eadc]">
             <span className="block text-[15px] font-extrabold leading-none">
-              ↗ {formatDistance(airDistance)}
+              {formatDistance(estimatedDistance)}
             </span>
             <span className="mt-1 block text-[10px] font-bold leading-none opacity-75">
-              đường thẳng
+              ước tính
             </span>
+            {airDistance != null && (
+              <span className="mt-1.5 block text-[9px] font-medium leading-none opacity-65">
+                ↗ {formatDistance(airDistance)} thẳng
+              </span>
+            )}
           </div>
         ) : (
           <ChevronRight size={18} className="mt-2 text-[#a35e2d]" />
         )}
       </button>
-      <a
-        href={directionsUrl(restaurant, travelMode)}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(event) => event.stopPropagation()}
-        className="mt-3 flex items-center justify-center gap-1.5 rounded-xl bg-[#402c1e]/7 py-2 text-[12px] font-bold text-[#402c1e] transition hover:bg-[#402c1e]/10 dark:bg-[#f7eadc]/10 dark:text-[#f7eadc]"
-      >
-        <Navigation size={14} strokeWidth={2.5} />
-        Chỉ đường Google Maps
-      </a>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {onQuickLog && (
+          <button
+            type="button"
+            onClick={onQuickLog}
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-[#a35e2d] py-2 text-[12px] font-extrabold text-white transition active:scale-[.98]"
+          >
+            <Check size={14} strokeWidth={3} />
+            Check-in
+          </button>
+        )}
+        <a
+          href={directionsUrl(restaurant, travelMode)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(event) => event.stopPropagation()}
+          className={`flex items-center justify-center gap-1.5 rounded-xl bg-[#402c1e]/7 py-2 text-[12px] font-bold text-[#402c1e] transition hover:bg-[#402c1e]/10 dark:bg-[#f7eadc]/10 dark:text-[#f7eadc] ${onQuickLog ? "" : "col-span-2"}`}
+        >
+          <Navigation size={14} strokeWidth={2.5} />
+          Chỉ đường
+        </a>
+      </div>
     </article>
   );
 }
@@ -371,6 +517,7 @@ function RestaurantForm({
   restaurants,
   categories,
   adminWards,
+  clipboardText,
   onClose,
   onSaved,
 }: {
@@ -378,6 +525,7 @@ function RestaurantForm({
   restaurants: Restaurant[];
   categories: string[];
   adminWards: Ward[];
+  clipboardText: string | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -387,7 +535,10 @@ function RestaurantForm({
   const [advanced, setAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [clipboardReading, setClipboardReading] = useState(false);
+  const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
   const swipeHandlers = useSwipeToClose(onClose);
+  useModalBodyLock();
   const candidates = useMemo(
     () => similarRestaurants(draft, restaurants, restaurant?.id),
     [draft, restaurants, restaurant?.id],
@@ -396,6 +547,33 @@ function RestaurantForm({
     key: K,
     value: RestaurantDraft[K],
   ) => setDraft((state) => ({ ...state, [key]: value }));
+  const clipboardAddress = clipboardText ? clipboardAddressSuggestion(clipboardText) : null;
+  const applyClipboard = (value: string) => {
+    const address = clipboardAddressSuggestion(value);
+    if (!address) {
+      setClipboardMessage("Clipboard chưa có địa chỉ Hà Nội hoặc link Google Maps.");
+      return;
+    }
+    set("address_raw", address);
+    const coordinates = clipboardCoordinates(value);
+    if (coordinates) set("coordinates", coordinates);
+    setClipboardMessage(coordinates ? "Đã dán địa chỉ và tọa độ." : "Đã dán địa chỉ từ Google Maps.");
+  };
+  const readClipboard = async () => {
+    if (!navigator.clipboard?.readText) {
+      setClipboardMessage("Trình duyệt không cho phép đọc clipboard. Hãy dán thủ công.");
+      return;
+    }
+    setClipboardReading(true);
+    setClipboardMessage(null);
+    try {
+      applyClipboard(await navigator.clipboard.readText());
+    } catch {
+      setClipboardMessage("Chưa được cấp quyền đọc clipboard. Hãy bấm lại hoặc dán thủ công.");
+    } finally {
+      setClipboardReading(false);
+    }
+  };
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!supabase)
@@ -449,7 +627,7 @@ function RestaurantForm({
       geocode_source: coordinates
         ? "manual"
         : geocoded
-          ? "nominatim"
+          ? geocoded.source || "nominatim"
           : shouldGeocode
             ? "unset"
             : restaurant?.geocode_source || "unset",
@@ -514,7 +692,7 @@ function RestaurantForm({
               value={draft.name}
               onChange={(e) => set("name", e.target.value)}
               className={inputClass}
-              placeholder="Ví dụ: Bún chả Ngọc Xuân"
+              placeholder="Nhập tên quán"
             />
           </Field>
           {candidates.length > 0 && (
@@ -540,21 +718,44 @@ function RestaurantForm({
             <p className="mt-1 text-[11px] text-[#8a7360]">
               Sau khi lưu, app sẽ chuẩn hoá địa chỉ và tự gắn phường khi dữ liệu OSM xác định được.
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={readClipboard}
+                disabled={clipboardReading}
+                className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-[#e5a36a]/25 px-3 py-1.5 text-left text-[11px] font-bold text-[#70421f] dark:text-[#f6d3aa]"
+              >
+                <ClipboardPaste size={13} className="shrink-0" />
+                <span className="truncate">{clipboardReading ? "Đang đọc clipboard…" : "Đọc clipboard / Dán nhanh"}</span>
+              </button>
+              {clipboardAddress && (
+                <button
+                  type="button"
+                  onClick={() => applyClipboard(clipboardText || "")}
+                  className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-[#a35e2d]/12 px-3 py-1.5 text-left text-[11px] font-bold text-[#7f421e] dark:text-[#f1c496]"
+                >
+                  Dùng nội dung đã phát hiện
+                </button>
+              )}
+            </div>
+            {clipboardMessage && <p className="mt-1 text-[11px] font-semibold text-[#a35e2d]">{clipboardMessage}</p>}
           </Field>
           <Field label="Nhóm món *">
-            <select
+            <input
               required
               value={draft.category}
               onChange={(event) => set("category", event.target.value)}
+              list="restaurant-categories"
               className={inputClass}
-            >
-              <option value="">Chọn nhóm món</option>
+              placeholder="Chọn hoặc gõ nhóm món mới"
+            />
+            <datalist id="restaurant-categories">
               {categories.map((value) => (
                 <option key={value} value={value}>
                   {value}
                 </option>
               ))}
-            </select>
+            </datalist>
           </Field>
           <Field label="Ghi chú">
             <textarea
@@ -654,6 +855,7 @@ function Detail({
   onStatus,
   onTaste,
   travelMode,
+  ward,
 }: {
   restaurant: Restaurant;
   onClose: () => void;
@@ -662,20 +864,42 @@ function Detail({
   onStatus: (status: Status) => Promise<void>;
   onTaste: (taste: "ngon" | "khong_ngon" | null) => Promise<void>;
   travelMode: TravelMode;
+  ward?: Ward | null;
 }) {
   const [updating, setUpdating] = useState(false);
-  const swipeHandlers = useSwipeToClose(onClose);
+  const [visits, setVisits] = useState<VisitLog[]>([]);
+  const sheetDismissHandlers = useBottomSheetDismiss(onClose);
+  useModalBodyLock();
+  const detailWardName = displayWardName(ward || restaurant.admin_wards);
+  useEffect(() => {
+    if (!supabase) return;
+    supabase
+      .from("visit_logs")
+      .select("*")
+      .eq("restaurant_id", restaurant.id)
+      .order("visited_at", { ascending: false })
+      .limit(8)
+      .then(({ data }) => setVisits((data || []) as VisitLog[]));
+  }, [restaurant.id]);
   const update = async (task: () => Promise<void>) => {
     setUpdating(true);
     await task();
     setUpdating(false);
   };
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-[#1c130d]/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#140e0a]/35 backdrop-blur-sm md:justify-end">
       <aside
-        {...swipeHandlers}
-        className="h-full w-full max-w-xl touch-pan-y overflow-y-auto bg-[#fbf3ea] px-5 py-6 shadow-2xl dark:bg-[#281b13]"
+          onTouchMove={(event) => event.stopPropagation()}
+          className="isolate h-[88dvh] w-full max-w-xl touch-pan-y overscroll-contain overflow-y-auto rounded-t-[30px] bg-[#fbf3ea] px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-[#281b13] md:h-full md:rounded-none md:py-6"
       >
+        <div
+          {...sheetDismissHandlers}
+          className="mx-auto mb-3 flex w-full touch-none cursor-grab flex-col items-center justify-center gap-1.5 py-1 md:hidden"
+          aria-label="Vuốt xuống để đóng"
+        >
+          <span className="h-2 w-16 rounded-full bg-[#a35e2d]/60 shadow-sm dark:bg-[#e5a36a]/65" />
+          <span className="text-[10px] font-bold text-[#8a7360]">Kéo xuống để đóng</span>
+        </div>
         <div className="mb-6 flex items-center justify-between">
           <button
             onClick={onClose}
@@ -702,7 +926,7 @@ function Detail({
           </div>
         </div>
         <p className="mb-3 text-[10px] font-bold text-[#8a7360] md:hidden">
-          Vuốt ngang để quay lại
+          Kéo thanh phía trên xuống để đóng
         </p>
         <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">
           CHI TIẾT QUÁN
@@ -723,15 +947,15 @@ function Detail({
           <p className="flex items-start gap-2 text-sm leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
             <MapPin size={18} className="mt-0.5 shrink-0 text-[#a35e2d]" />
             {restaurant.address_raw || "Chưa có địa chỉ"}
-            {restaurant.admin_wards &&
+            {detailWardName &&
               restaurant.address_raw &&
               !addressAlreadyIncludesWard(
                 restaurant.address_raw,
-                restaurant.admin_wards.name,
+                detailWardName,
               ) && (
               <>
                 <br />
-                {restaurant.admin_wards.name}
+                {detailWardName}
               </>
             )}
           </p>
@@ -801,6 +1025,17 @@ function Detail({
             </p>
           </section>
         )}
+        <section className="mt-7">
+          <SectionTitle>Lịch sử ghé quán</SectionTitle>
+          <div className="overflow-hidden rounded-2xl border border-[#402c1e]/8 bg-white/35 dark:bg-black/10">
+            {visits.length ? visits.map((visit) => (
+              <div key={visit.id} className="flex items-center justify-between border-b border-[#402c1e]/8 px-3 py-3 last:border-0">
+                <div><p className="text-sm font-bold">{visit.visited_at}</p>{visit.note && <p className="mt-0.5 text-xs text-[#8a7360]">{visit.note}</p>}</div>
+                {visit.taste_rating && <TasteBadge taste={visit.taste_rating} />}
+              </div>
+            )) : <p className="px-3 py-5 text-sm text-[#8a7360]">Chưa có lần ghé nào được ghi lại.</p>}
+          </div>
+        </section>
         {updating && (
           <p className="mt-5 text-sm text-[#8a7360]">Đang cập nhật…</p>
         )}
@@ -1132,7 +1367,13 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [status, setStatus] = useState<FilterStatus>("all");
   const [category, setCategory] = useState("all");
+  const [categoryFilterSearch, setCategoryFilterSearch] = useState("");
+  const [showAllCategories, setShowAllCategories] = useState(false);
   const [ward, setWard] = useState("all");
+  const [quickFilter, setQuickFilter] = useState<QuickContext>("all");
+  const [wardPickerOpen, setWardPickerOpen] = useState(false);
+  const [clipboardText, setClipboardText] = useState<string | null>(null);
+  const [quickLoggingId, setQuickLoggingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Restaurant | null>(null);
   const [formTarget, setFormTarget] = useState<Restaurant | null | undefined>(
     undefined,
@@ -1176,6 +1417,13 @@ export default function Home() {
     refresh();
   }, []);
   useEffect(() => {
+    if (!navigator.clipboard?.readText) return;
+    navigator.clipboard
+      .readText()
+      .then((value) => setClipboardText(clipboardAddressSuggestion(value) ? value : null))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
     const savedMode = window.localStorage.getItem("prot-food-travel-mode");
     if (savedMode === "two-wheeler" || savedMode === "driving")
       setTravelMode(savedMode);
@@ -1201,7 +1449,7 @@ export default function Home() {
     locationWatchRef.current = navigator.geolocation.watchPosition(onPosition, onError, options);
   }, []);
   useEffect(() => {
-    if (tab !== "nearby") return;
+    if (tab !== "nearby" && tab !== "roulette") return;
     getLocation();
     return () => {
       if (locationWatchRef.current != null)
@@ -1220,17 +1468,15 @@ export default function Home() {
       ].sort((a, b) => a.localeCompare(b, "vi")),
     [restaurants],
   );
-  const wards = useMemo(
-    () =>
-      [
-        ...new Set(
-          restaurants
-            .map((item) => item.admin_wards?.name)
-            .filter((item): item is string => Boolean(item)),
-        ),
-      ].sort((a, b) => a.localeCompare(b, "vi")),
-    [restaurants],
-  );
+  const visibleCategories = useMemo(() => {
+    const query = categoryFilterSearch.trim().toLocaleLowerCase("vi");
+    const matching = query
+      ? categories.filter((value) => value.toLocaleLowerCase("vi").includes(query))
+      : categories;
+    const limited = showAllCategories || query ? matching : matching.slice(0, 8);
+    if (category !== "all" && !limited.includes(category)) return [category, ...limited];
+    return limited;
+  }, [categories, category, categoryFilterSearch, showAllCategories]);
   const filtered = useMemo(
     () =>
       restaurants.filter((item) => {
@@ -1239,6 +1485,7 @@ export default function Home() {
           item.name,
           item.address_raw,
           item.notes,
+          item.shop_note,
           item.admin_wards?.name,
         ]
           .filter(Boolean)
@@ -1253,9 +1500,28 @@ export default function Home() {
       }),
     [restaurants, searchQuery, status, category, ward],
   );
+  const contextFiltered = useMemo(
+    () =>
+      filtered.filter((item) => {
+        if (quickFilter === "favorite") return item.taste_rating === "ngon";
+        if (quickFilter === "untried") return item.status === "muon_den";
+        if (quickFilter === "stale") {
+          if (!item.last_visited_at) return false;
+          return Date.now() - new Date(`${item.last_visited_at}T00:00:00`).getTime() > 90 * 86_400_000;
+        }
+        if (quickFilter === "nearest") {
+          return Boolean(
+            position && item.lat != null && item.lng != null &&
+              smartEstimatedDistanceKm(position, { lat: item.lat, lng: item.lng }) < 1.5,
+          );
+        }
+        return true;
+      }),
+    [filtered, position, quickFilter],
+  );
   const nearbyByAir = useMemo(
     () =>
-      filtered
+      contextFiltered
         .map((item) => ({
           item,
           airDistance:
@@ -1264,17 +1530,25 @@ export default function Home() {
             item.lng != null
               ? haversineKm(position.lat, position.lng, item.lat, item.lng)
               : undefined,
+          estimatedDistance:
+            position && item.lat != null && item.lng != null
+              ? smartEstimatedDistanceKm(position, { lat: item.lat, lng: item.lng })
+              : undefined,
         }))
         .sort(
           (a, b) =>
-            (a.airDistance ?? Infinity) - (b.airDistance ?? Infinity),
+            (a.estimatedDistance ?? Infinity) -
+              (b.estimatedDistance ?? Infinity) ||
+            a.item.id.localeCompare(b.item.id),
         ),
-    [filtered, position],
+    [contextFiltered, position],
   );
   const routeCandidateKey = useMemo(
     () =>
       nearbyByAir
-        .filter(({ item, airDistance }) => airDistance != null && isRouteEligible(item))
+        .filter(({ item, estimatedDistance }) =>
+          estimatedDistance != null && isRouteEligible(item),
+        )
         .slice(0, ROUTE_CANDIDATE_LIMIT)
         .map(({ item }) => item.id)
         .join(","),
@@ -1328,8 +1602,6 @@ export default function Home() {
   }, [position, routingPosition, tab]);
   useEffect(() => {
     if (tab !== "nearby" || !routingPosition || !routeCandidates.length) {
-      roadRoutesRef.current = {};
-      setRoadRoutes({});
       setRoutingState("idle");
       return;
     }
@@ -1338,10 +1610,10 @@ export default function Home() {
     if (cachedRaw) {
       try {
         const cached = JSON.parse(cachedRaw) as RouteCache;
+        roadRoutesRef.current = cached.routes;
+        setRoadRoutes(cached.routes);
+        setRoutingState("ready");
         if (Date.now() - cached.savedAt < ROUTE_CACHE_MS) {
-          roadRoutesRef.current = cached.routes;
-          setRoadRoutes(cached.routes);
-          setRoutingState("ready");
           return;
         }
       } catch {
@@ -1362,11 +1634,15 @@ export default function Home() {
         if (!response.ok) throw new Error("Routing không phản hồi");
         const data = (await response.json()) as {
           distances: Record<string, number | null>;
+          isEstimated?: boolean;
         };
         const routes: Record<string, RoadRoute> = {};
         for (const [id, meters] of Object.entries(data.distances)) {
           if (typeof meters === "number" && meters > 0)
-            routes[id] = { distanceKm: meters / 1000 };
+            routes[id] = {
+              distanceKm: meters / 1000,
+              isEstimated: data.isEstimated,
+            };
         }
         if (!controller.signal.aborted) {
           roadRoutesRef.current = routes;
@@ -1392,21 +1668,26 @@ export default function Home() {
   const nearby = useMemo(
     () =>
       nearbyByAir
-        .map(({ item, airDistance }) => ({
+        .map(({ item, airDistance, estimatedDistance }) => ({
           item,
           airDistance,
-          roadRoute: roadRoutes[item.id],
-        }))
-        .sort(
-          (a, b) =>
-            (a.roadRoute?.distanceKm ?? a.airDistance ?? Infinity) -
-            (b.roadRoute?.distanceKm ?? b.airDistance ?? Infinity),
-        ),
-    [nearbyByAir, roadRoutes],
+          estimatedDistance,
+          roadRoute: position ? roadRoutes[item.id] : undefined,
+        })),
+    [nearbyByAir, position, roadRoutes],
   );
   const visited = restaurants.filter((item) => item.status === "da_den");
   const good = visited.filter((item) => item.taste_rating === "ngon");
   const bad = visited.filter((item) => item.taste_rating === "khong_ngon");
+  const wardOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    restaurants.forEach((item) => {
+      const name = item.admin_wards?.name;
+      if (name) counts.set(name, (counts.get(name) || 0) + 1);
+    });
+    return Array.from(counts, ([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [restaurants]);
   async function updateRestaurant(
     restaurant: Restaurant,
     update: Record<string, unknown>,
@@ -1438,6 +1719,24 @@ export default function Home() {
         ? { status: nextStatus, taste_rating: null }
         : { status: nextStatus },
     );
+  }
+  async function quickLogRestaurant(restaurant: Restaurant) {
+    if (!supabase || quickLoggingId) return;
+    setQuickLoggingId(restaurant.id);
+    const { error } = await supabase.from("visit_logs").insert({
+      restaurant_id: restaurant.id,
+      visited_at: new Date().toISOString().slice(0, 10),
+      taste_rating: restaurant.taste_rating || null,
+      price_level: restaurant.price_level || null,
+    });
+    if (error) {
+      notify(error.message);
+    } else {
+      navigator.vibrate?.(15);
+      await refresh();
+      notify(`Đã check-in ${restaurant.name}.`);
+    }
+    setQuickLoggingId(null);
   }
   async function afterSave() {
     await refresh();
@@ -1476,11 +1775,31 @@ export default function Home() {
         </Chip>
       </div>
       <SectionTitle>Nhóm món</SectionTitle>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="mb-2 flex max-w-full items-center gap-2">
+        <label className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-[#402c1e]/10 bg-white/40 px-2.5 py-2 dark:bg-black/10">
+          <Search size={14} className="shrink-0 text-[#a35e2d]" />
+          <input
+            value={categoryFilterSearch}
+            onChange={(event) => setCategoryFilterSearch(event.target.value)}
+            placeholder="Tìm nhóm món…"
+            className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-[#8a7360]"
+          />
+        </label>
+        {categories.length > 8 && (
+          <button
+            type="button"
+            onClick={() => setShowAllCategories((value) => !value)}
+            className="shrink-0 rounded-xl bg-[#402c1e]/7 px-2.5 py-2 text-xs font-bold text-[#402c1e] dark:bg-white/10 dark:text-[#f7eadc]"
+          >
+            {showAllCategories ? "Thu gọn" : `+${categories.length - 8}`}
+          </button>
+        )}
+      </div>
+      <div className="flex max-w-full gap-2 overflow-x-auto pb-1">
         <Chip active={category === "all"} onClick={() => setCategory("all")}>
           Tất cả
         </Chip>
-        {categories.map((value) => (
+        {visibleCategories.map((value) => (
           <Chip
             key={value}
             active={category === value}
@@ -1493,18 +1812,14 @@ export default function Home() {
       {withWard && (
         <>
           <SectionTitle>Phường / xã</SectionTitle>
-          <select
-            value={ward}
-            onChange={(event) => setWard(event.target.value)}
-            className={`${inputClass} py-2`}
+          <button
+            type="button"
+            onClick={() => setWardPickerOpen(true)}
+            className="flex w-full items-center justify-between rounded-xl border border-[#402c1e]/15 bg-white/60 px-3 py-2.5 text-left text-sm font-bold text-[#402c1e] dark:border-[#f7eadc]/15 dark:bg-[#1c130d]/40 dark:text-[#f7eadc]"
           >
-            <option value="all">Tất cả phường / xã có quán</option>
-            {wards.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
+            <span>{ward === "all" ? "Tất cả phường / xã có quán" : ward}</span>
+            <Search size={16} className="text-[#a35e2d]" />
+          </button>
         </>
       )}
     </>
@@ -1512,25 +1827,29 @@ export default function Home() {
   const navItems = [
     { id: "nearby" as const, label: "Gần đây", icon: Compass },
     { id: "list" as const, label: "Danh sách", icon: List },
+    { id: "roulette" as const, label: "Ăn gì?", icon: Dices },
     { id: "profile" as const, label: "Cá nhân", icon: UserRound },
-    { id: "report" as const, label: "Báo cáo", icon: BarChart3 },
   ];
   const pageTitle =
     tab === "nearby"
       ? "Gần đây"
       : tab === "list"
         ? "Danh sách"
+        : tab === "roulette"
+          ? "Hôm nay ăn gì?"
         : tab === "profile"
           ? "Cá nhân"
-          : "Báo cáo";
+          : "";
   const pageSubtitle =
     tab === "nearby"
       ? "Quán quanh vị trí hiện tại của bạn"
       : tab === "list"
         ? `${restaurants.length} quán · ${visited.length} đã đến`
+        : tab === "roulette"
+          ? "Một gợi ý hợp thời điểm, hợp vị trí"
         : tab === "profile"
           ? "Danh sách ăn uống của bạn"
-          : "Tổng hợp và xuất dữ liệu vị trí";
+          : "";
   return (
     <main className="app-background min-h-screen">
       <PwaRegister />
@@ -1556,14 +1875,22 @@ export default function Home() {
               </button>
             ))}
           </nav>
+          <button
+            type="button"
+            onClick={() => setFormTarget(null)}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#a35e2d] px-3 py-3 text-sm font-extrabold text-white shadow-lg shadow-[#a35e2d]/20"
+          >
+            <Plus size={18} />
+            Thêm quán mới
+          </button>
           <p className="mt-auto px-3 text-xs leading-relaxed text-[#8a7360]">
-            PWA cá nhân · không có bản đồ trong app.<br />v2.0.0
+            PWA cá nhân · không có bản đồ trong app.<br />v3.1.0
           </p>
         </aside>
         <section className="min-w-0 flex-1 px-4 pb-28 pt-6 sm:px-6 md:px-10 md:pb-10">
           <header className="mb-5">
             <p className="text-[11px] font-extrabold tracking-[0.18em] text-[#a35e2d] md:hidden">
-              PROT FOOD · v2.0.0
+              PROT FOOD · v3.1.0
             </p>
             <h1 className="mt-1 text-3xl font-extrabold tracking-tight">
               {pageTitle}
@@ -1641,38 +1968,40 @@ export default function Home() {
                       </div>
                     </div>
                     <p className="mt-2 text-[11px] leading-relaxed text-[#8a7360]">
-                      “Đường đi” là ước tính theo dữ liệu đường OSM, không gồm kẹt xe. Quán có pin cần xem xét chỉ hiện khoảng cách thẳng.
+                      “Đường đi” ưu tiên dữ liệu OSM; khi dịch vụ bận, ứng dụng tự ước tính đường vòng qua sông hồ và không gồm kẹt xe.
                     </p>
                   </>
                 )}
-                {!position && wards.length > 0 && (
-                  <select
-                    value={ward}
-                    onChange={(event) => setWard(event.target.value)}
-                    className={`${inputClass} mt-3 py-2 text-xs`}
+                {!position && wardOptions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setWardPickerOpen(true)}
+                    className="mt-3 flex w-full items-center justify-between rounded-xl bg-[#402c1e]/6 px-3 py-2.5 text-left text-xs font-bold dark:bg-white/8"
                   >
-                    <option value="all">
-                      Hoặc chọn phường/xã để lọc gần đúng
-                    </option>
-                    {wards.map((value) => (
-                      <option key={value}>{value}</option>
-                    ))}
-                  </select>
+                    <span>{ward === "all" ? "Hoặc chọn phường / xã để lọc gần đúng" : ward}</span>
+                    <Search size={15} className="text-[#a35e2d]" />
+                  </button>
                 )}
               </div>
+              <SectionTitle>Lọc theo ngữ cảnh</SectionTitle>
+              <QuickContextFilter value={quickFilter} onChange={setQuickFilter} />
+              <SectionTitle>Bộ lọc cơ bản</SectionTitle>
               {filterRow()}
               <div className="mt-4">
-                {loading ? (
+                {loading || (!position && !locationError) ? (
                   <Loading />
                 ) : nearby.length ? (
-                  nearby.map(({ item, airDistance, roadRoute }) => (
+                  nearby.map(({ item, airDistance, estimatedDistance, roadRoute }) => (
                     <RestaurantCard
                       key={item.id}
                       restaurant={item}
                       airDistance={airDistance}
+                      estimatedDistance={estimatedDistance}
                       roadRoute={roadRoute}
                       travelMode={travelMode}
+                      ward={wardForRestaurant(item, adminWards)}
                       onOpen={() => setSelected(item)}
+                      onQuickLog={() => quickLogRestaurant(item)}
                     />
                   ))
                 ) : (
@@ -1701,7 +2030,9 @@ export default function Home() {
                     <RestaurantCard
                       key={item.id}
                       restaurant={item}
+                      ward={wardForRestaurant(item, adminWards)}
                       onOpen={() => setSelected(item)}
+                      onQuickLog={() => quickLogRestaurant(item)}
                     />
                   ))
                 ) : (
@@ -1758,24 +2089,50 @@ export default function Home() {
                   </Chip>
                 </div>
               </section>
+              <FoodFootprint restaurants={restaurants} onOpen={setSelected} />
+              <details className="glass rounded-[20px] p-4">
+                <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold"><FileCheck2 size={17} className="text-[#a35e2d]" />Báo cáo chất lượng tọa độ & xuất dữ liệu</summary>
+                <div className="mt-4"><ReportView restaurants={restaurants} notify={notify} /></div>
+              </details>
             </div>
           )}
-          {tab === "report" && (
-            <ReportView restaurants={restaurants} notify={notify} />
+          {tab === "roulette" && (
+            <FoodRoulette
+              restaurants={restaurants}
+              position={position}
+              travelMode={travelMode}
+              onOpen={setSelected}
+            />
           )}
         </section>
       </div>
-      {tab !== "profile" && tab !== "report" && (
-        <button
+      <button
           onClick={() => setFormTarget(null)}
-          className="fixed bottom-24 right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-[#a35e2d] text-white shadow-lg shadow-[#a35e2d]/35 transition hover:scale-105 active:scale-95 md:bottom-7 md:right-8"
+          className="fixed bottom-7 right-8 z-30 hidden h-14 w-14 items-center justify-center rounded-full bg-[#a35e2d] text-white shadow-lg shadow-[#a35e2d]/35 transition hover:scale-105 active:scale-95 md:flex"
           aria-label="Thêm quán"
         >
           <Plus size={26} strokeWidth={2.7} />
         </button>
-      )}
-      <nav className="glass fixed inset-x-4 bottom-4 z-20 mx-auto flex max-w-md items-center justify-around rounded-[22px] px-2 py-2 md:hidden">
-        {navItems.map((item) => (
+      <nav className="glass fixed inset-x-3 bottom-3 z-20 mx-auto grid max-w-md grid-cols-5 items-end rounded-[24px] px-1 pb-[calc(.45rem+env(safe-area-inset-bottom))] pt-2 md:hidden">
+        {navItems.slice(0, 2).map((item) => (
+          <button
+            key={item.id}
+            onClick={() => setTab(item.id)}
+            className={`flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-bold ${tab === item.id ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
+          >
+            <item.icon size={18} />
+            {item.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setFormTarget(null)}
+          className="-mt-8 justify-self-center rounded-full border-4 border-[#fbf3ea] bg-[#a35e2d] p-3 text-white shadow-lg shadow-[#a35e2d]/35 dark:border-[#140e0a]"
+          aria-label="Thêm quán mới"
+        >
+          <Plus size={23} strokeWidth={3} />
+        </button>
+        {navItems.slice(2).map((item) => (
           <button
             key={item.id}
             onClick={() => setTab(item.id)}
@@ -1797,6 +2154,7 @@ export default function Home() {
             updateRestaurant(selected, { taste_rating: taste })
           }
           travelMode={travelMode}
+          ward={wardForRestaurant(selected, adminWards)}
         />
       )}
       {formTarget !== undefined && (
@@ -1805,6 +2163,7 @@ export default function Home() {
           restaurants={restaurants}
           categories={categories}
           adminWards={adminWards}
+          clipboardText={clipboardText}
           onClose={() => setFormTarget(undefined)}
           onSaved={afterSave}
         />
@@ -1814,6 +2173,13 @@ export default function Home() {
           {toast}
         </div>
       )}
+      <SearchableWardModal
+        open={wardPickerOpen}
+        wards={wardOptions satisfies WardOption[]}
+        value={ward}
+        onClose={() => setWardPickerOpen(false)}
+        onChange={setWard}
+      />
     </main>
   );
 }
@@ -1838,12 +2204,7 @@ function Stat({
   );
 }
 function Loading() {
-  return (
-    <div className="flex items-center justify-center gap-2 py-16 text-sm text-[#8a7360]">
-      <Loader2 className="animate-spin" size={18} />
-      Đang tải danh sách…
-    </div>
-  );
+  return <SkeletonCard />;
 }
 function Empty({ text }: { text: string }) {
   return (

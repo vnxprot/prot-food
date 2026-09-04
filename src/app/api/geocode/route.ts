@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { decodePlusCode, extractPlusCode } from "@/lib/plus-codes";
 
 type NominatimAddress = {
   house_number?: string;
@@ -58,6 +59,18 @@ function streetMatchesInput(input: string, address?: NominatimAddress) {
     "pho",
     "ngo",
     "ngach",
+    "hem",
+    "nha",
+    "to",
+    "khu",
+    "tap",
+    "the",
+    "phuong",
+    "xa",
+    "quan",
+    "huyen",
+    "thi",
+    "tran",
     "ha",
     "noi",
     "viet",
@@ -115,6 +128,22 @@ export async function GET(request: NextRequest) {
   const name = request.nextUrl.searchParams.get("name")?.trim();
   if (!address) return NextResponse.json({ error: "Thiếu địa chỉ" }, { status: 400 });
 
+  const plusCode = extractPlusCode(address);
+  const plusCodePosition = plusCode ? decodePlusCode(plusCode) : null;
+  if (plusCode && plusCodePosition && isInsideHanoi(plusCodePosition.lat, plusCodePosition.lng)) {
+    return NextResponse.json({
+      result: {
+        ...plusCodePosition,
+        displayName: address,
+        formattedAddress: address,
+        wardName: null,
+        confidence: "high",
+        query: plusCode,
+        source: "plus_code",
+      },
+    });
+  }
+
   // Street + house number is more reliable than an arbitrary venue name in OSM POI data.
   const queries = [
     `${address}, Hà Nội, Việt Nam`,
@@ -163,7 +192,7 @@ export async function GET(request: NextRequest) {
               normalized(addressDetails?.house_number || "") ===
                 normalized(inputHouseNumber)
                 ? "high"
-                : "low",
+                : "medium",
             query: queries[index],
           },
         });

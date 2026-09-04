@@ -1,9 +1,8 @@
 export type Status = "muon_den" | "da_den";
-// Legacy data may still contain "binh_thuong". The simplified UI no longer writes it.
-export type TasteRating = "ngon" | "binh_thuong" | "khong_ngon";
+export type TasteRating = "ngon" | "khong_ngon";
 export type PriceLevel = "re" | "binh_thuong" | "dat";
-export type GeocodeSource = "nominatim" | "manual" | "unset";
-export type LocationVerification = "verified" | "needs_review" | "closed";
+export type GeocodeSource = "nominatim" | "plus_code" | "manual" | "unset";
+export type LocationVerification = "verified" | "unverified" | "closed";
 
 export type Ward = {
   id: string;
@@ -20,7 +19,7 @@ export type Restaurant = {
   lat: number | null;
   lng: number | null;
   geocode_source: GeocodeSource;
-  geocode_confidence: "high" | "low" | "manual";
+  geocode_confidence: "high" | "medium" | "low" | "manual";
   ward_id: string | null;
   category: string | null;
   price_level: PriceLevel | null;
@@ -46,6 +45,16 @@ export type ReviewQueueItem = {
   status: "open" | "resolved";
   created_at: string;
   restaurants?: Restaurant | null;
+};
+
+export type VisitLog = {
+  id: string;
+  restaurant_id: string;
+  visited_at: string;
+  taste_rating: TasteRating | null;
+  price_level: PriceLevel | null;
+  note: string | null;
+  created_at: string;
 };
 
 export type RestaurantDraft = {

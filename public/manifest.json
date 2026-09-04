@@ -1,7 +1,7 @@
 {
-  "name": "Prot Food",
+  "name": "Prot Food v3.1",
   "short_name": "Prot Food",
-  "description": "Danh sách quán ăn/uống Hà Nội của Prot",
+  "description": "Smart Neo-Glass food companion của Prot tại Hà Nội",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#FBF3EA",

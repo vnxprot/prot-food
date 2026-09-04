@@ -1,7 +1,7 @@
 import type { Restaurant, Status } from "./types";
 
 export const statusLabel: Record<Status, string> = { muon_den: "Muốn đến", da_den: "Đã đến" };
-export const tasteLabel = { ngon: "Ngon", binh_thuong: "Bình thường", khong_ngon: "Không ngon" };
+export const tasteLabel = { ngon: "Ngon", khong_ngon: "Không ngon" };
 export const priceLabel = { re: "₫", binh_thuong: "₫₫", dat: "₫₫₫" };
 
 export function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {

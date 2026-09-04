@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Be_Vietnam_Pro } from "next/font/google";
 import "./globals.css";
 
@@ -10,8 +10,8 @@ const beVietnamPro = Be_Vietnam_Pro({
 });
 
 export const metadata: Metadata = {
-  title: "Prot Food — Quán ngon Hà Nội",
-  description: "Danh sách quán ăn/uống cá nhân của Prot tại Hà Nội.",
+  title: "Prot Food v3.0 — Smart Neo-Glass",
+  description: "Trợ lý ẩm thực cá nhân thông minh của Prot tại Hà Nội.",
   manifest: "/manifest.json",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Prot Food" },
   icons: {
@@ -22,6 +22,17 @@ export const metadata: Metadata = {
     ],
     apple: "/apple-touch-icon.png",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FBF3EA" },
+    { media: "(prefers-color-scheme: dark)", color: "#140E0A" },
+  ],
 };
 
 export default function RootLayout({
