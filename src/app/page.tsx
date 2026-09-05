@@ -274,14 +274,19 @@ function useSwipeToClose(onSwipe: () => void) {
 function useBottomSheetDismiss(onDismiss: () => void) {
   const startY = useRef<number | null>(null);
   const dismissed = useRef(false);
+  const [offset, setOffset] = useState(0);
   const dismissIfDragged = (currentY: number) => {
     if (dismissed.current || startY.current == null) return;
-    if (currentY - startY.current > 72) {
+    const delta = Math.max(0, currentY - startY.current);
+    setOffset(Math.min(delta, 260));
+    if (delta > 110) {
       dismissed.current = true;
-      onDismiss();
+      window.setTimeout(onDismiss, 160);
     }
   };
+  const reset = () => { if (!dismissed.current) setOffset(0); startY.current = null; };
   return {
+    style: { transform: `translateY(${offset}px)`, transition: dismissed.current ? "transform 160ms ease-out" : "none" },
     onPointerDown: (event: React.PointerEvent) => {
       if (event.pointerType === "touch") {
         startY.current = event.clientY;
@@ -293,10 +298,9 @@ function useBottomSheetDismiss(onDismiss: () => void) {
       if (event.pointerType === "touch") dismissIfDragged(event.clientY);
     },
     onPointerUp: () => {
-      startY.current = null;
-      dismissed.current = false;
+      reset();
     },
-    onPointerCancel: () => { startY.current = null; },
+    onPointerCancel: reset,
     onTouchStart: (event: React.TouchEvent) => {
       startY.current = event.touches[0]?.clientY ?? null;
       dismissed.current = false;
@@ -305,7 +309,7 @@ function useBottomSheetDismiss(onDismiss: () => void) {
       const currentY = event.touches[0]?.clientY;
       if (currentY != null) dismissIfDragged(currentY);
     },
-    onTouchEnd: () => { startY.current = null; dismissed.current = false; },
+    onTouchEnd: reset,
   };
 }
 
@@ -679,14 +683,16 @@ function RestaurantForm({
         matchedWard?.id ||
         (shouldGeocode ? null : restaurant?.ward_id || null),
     };
-    const query = restaurant
-      ? supabase
-          .from("restaurants")
-          .update(payload)
-          .eq("id", restaurant.id)
-          .select("id")
-      : supabase.from("restaurants").insert(payload).select().single();
-    const { error: saveError } = await query;
+    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
+    let saveError: { message: string } | null = null;
+    if (adminPin) {
+      const response = await fetch("/api/admin/restaurants", { method: restaurant ? "PATCH" : "POST", headers: { "Content-Type": "application/json", "x-admin-key": adminPin }, body: JSON.stringify(restaurant ? { id: restaurant.id, payload } : { payload }) });
+      if (!response.ok) saveError = { message: ((await response.json().catch(() => null)) as { error?: string } | null)?.error || "Không thể lưu quán." };
+    } else {
+      const query = restaurant ? supabase.from("restaurants").update(payload).eq("id", restaurant.id) : supabase.from("restaurants").insert(payload);
+      const result = await query;
+      saveError = result.error;
+    }
     if (saveError) {
       setError(saveError.message);
       setSaving(false);
@@ -910,7 +916,7 @@ function Detail({
 }) {
   const [updating, setUpdating] = useState(false);
   const [visits, setVisits] = useState<VisitLog[]>([]);
-  const sheetDismissHandlers = useBottomSheetDismiss(onClose);
+  const { style: sheetStyle, ...sheetDismissHandlers } = useBottomSheetDismiss(onClose);
   useModalBodyLock();
   const detailWardName = displayWardName(ward || restaurant.admin_wards);
   const detailAddress = restaurant.address_raw
@@ -941,7 +947,8 @@ function Detail({
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-[#140e0a]/35 backdrop-blur-sm md:justify-end">
       <aside
           onTouchMove={(event) => event.stopPropagation()}
-          className="isolate h-[88dvh] w-full max-w-xl touch-pan-y overscroll-contain overflow-y-auto rounded-t-[30px] bg-[#fbf3ea] px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-[#281b13] md:h-full md:rounded-none md:py-6"
+          style={sheetStyle}
+          className="isolate h-[88dvh] w-full max-w-xl touch-pan-y overscroll-contain overflow-y-auto rounded-t-[30px] bg-[#fbf3ea] px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl transition-transform dark:bg-[#281b13] md:h-full md:rounded-none md:py-6"
       >
         <div
           {...sheetDismissHandlers}
@@ -1526,11 +1533,12 @@ export default function Home() {
     const pin = inputPin || window.prompt("Nhập mã PIN Quản trị viên (6 số):");
     if (!pin) return;
     const response = await fetch("/api/admin/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) });
-    if (response.ok) { setIsAdmin(true); window.localStorage.setItem("prot-food-admin-v1", "1"); notify(fromBookmark ? "Đã kích hoạt Admin từ bookmark." : "Đã mở khóa quyền Admin thành công!"); }
+    if (response.ok) { setIsAdmin(true); window.localStorage.setItem("prot-food-admin-v1", "1"); window.localStorage.setItem("prot-food-admin-pin", pin); notify(fromBookmark ? "Đã kích hoạt Admin từ bookmark." : "Đã mở khóa quyền Admin thành công!"); }
     else notify("Mã PIN không chính xác hoặc chưa cấu hình.");
   };
   const signOutAdmin = async () => {
     window.localStorage.removeItem("prot-food-admin-v1");
+    window.localStorage.removeItem("prot-food-admin-pin");
     setIsAdmin(false);
     notify("Đã đăng xuất quản trị.");
   };
@@ -1820,10 +1828,10 @@ export default function Home() {
     update: Record<string, unknown>,
   ) {
     if (!supabase) return;
-    const { error } = await supabase
-      .from("restaurants")
-      .update(update)
-      .eq("id", restaurant.id);
+    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
+    const error = adminPin
+      ? await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json", "x-admin-key": adminPin }, body: JSON.stringify({ id: restaurant.id, payload: update }) }).then(async (response) => response.ok ? null : new Error((((await response.json().catch(() => null)) as { error?: string } | null)?.error) || "Không thể cập nhật quán."))
+      : (await supabase.from("restaurants").update(update).eq("id", restaurant.id)).error;
     if (error) return notify(error.message);
     const next = { ...restaurant, ...update } as Restaurant;
     setSelected(next);
@@ -1875,16 +1883,17 @@ export default function Home() {
       notify(deleteError.message);
       return false;
     }
-    const { error: resetError } = await supabase
-      .from("restaurants")
-      .update({
+    const resetPayload = {
         status: "muon_den",
         last_visited_at: null,
         visit_count: 0,
         taste_rating: null,
         price_level: null,
-      })
-      .eq("id", restaurant.id);
+      };
+    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
+    const resetError = adminPin
+      ? await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json", "x-admin-key": adminPin }, body: JSON.stringify({ id: restaurant.id, payload: resetPayload }) }).then(async (response) => response.ok ? null : new Error("Không thể cập nhật lịch sử."))
+      : (await supabase.from("restaurants").update(resetPayload).eq("id", restaurant.id)).error;
     if (resetError) {
       notify(resetError.message);
       return false;
@@ -1912,10 +1921,10 @@ export default function Home() {
       !window.confirm(`Xoá “${selected.name}”? Không thể hoàn tác.`)
     )
       return;
-    const { error } = await supabase
-      .from("restaurants")
-      .delete()
-      .eq("id", selected.id);
+    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
+    const error = adminPin
+      ? await fetch(`/api/admin/restaurants?id=${encodeURIComponent(selected.id)}`, { method: "DELETE", headers: { "x-admin-key": adminPin } }).then(async (response) => response.ok ? null : new Error("Không thể xóa quán."))
+      : (await supabase.from("restaurants").delete().eq("id", selected.id)).error;
     if (error) return notify(error.message);
     setSelected(null);
     await refresh();
