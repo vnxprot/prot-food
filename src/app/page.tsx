@@ -683,8 +683,7 @@ function RestaurantForm({
           .from("restaurants")
           .update(payload)
           .eq("id", restaurant.id)
-          .select()
-          .single()
+          .select("id")
       : supabase.from("restaurants").insert(payload).select().single();
     const { error: saveError } = await query;
     if (saveError) {
@@ -1630,12 +1629,7 @@ export default function Home() {
           if (!item.last_visited_at) return false;
           return Date.now() - new Date(`${item.last_visited_at}T00:00:00`).getTime() > 90 * 86_400_000;
         }
-        if (quickFilter === "nearest") {
-          return Boolean(
-            position && item.lat != null && item.lng != null &&
-              smartEstimatedDistanceKm(position, { lat: item.lat, lng: item.lng }) < 1.5,
-          );
-        }
+        if (quickFilter === "nearest") return true;
         return true;
       }),
     [filtered, position, quickFilter],
@@ -1795,6 +1789,7 @@ export default function Home() {
           estimatedDistance,
           roadRoute: position ? roadRoutes[item.id] : undefined,
         }))
+        .filter(({ item, roadRoute, estimatedDistance }) => quickFilter !== "nearest" || Boolean(roadRoute && roadRoute.distanceKm < 1.5) || (!position && estimatedDistance != null && estimatedDistance < 1.5))
         .sort(
           (a, b) =>
             (a.roadRoute?.distanceKm ?? a.estimatedDistance ?? Infinity) -
@@ -1803,7 +1798,7 @@ export default function Home() {
               (b.estimatedDistance ?? Infinity) ||
             a.item.id.localeCompare(b.item.id),
         ),
-    [nearbyByAir, position, roadRoutes],
+    [nearbyByAir, position, roadRoutes, quickFilter],
   );
   const visited = restaurants.filter((item) => item.status === "da_den");
   const good = visited.filter((item) => item.taste_rating === "ngon");
