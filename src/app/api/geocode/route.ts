@@ -41,6 +41,18 @@ const HANOI_BOUNDS = {
   east: 106.05,
 };
 
+// People naturally abbreviate Vietnamese street labels. Expand only when the
+// abbreviation begins a token, so venue names and normal words are untouched.
+function canonicalizeVietnameseAddress(value: string) {
+  return value
+    .replace(/(^|[\s,])ngh\.\s*/giu, "$1Ngách ")
+    .replace(/(^|[\s,])ng\.\s*/giu, "$1Ngõ ")
+    .replace(/(^|[\s,])đ\.\s*/giu, "$1Đường ")
+    .replace(/(^|[\s,])p\.\s*/giu, "$1Phố ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function isInsideHanoi(lat: number, lng: number) {
   return (
     lat >= HANOI_BOUNDS.south &&
@@ -162,7 +174,8 @@ async function searchNominatim(query: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const address = request.nextUrl.searchParams.get("address")?.trim();
+  const rawAddress = request.nextUrl.searchParams.get("address")?.trim();
+  const address = rawAddress ? canonicalizeVietnameseAddress(rawAddress) : null;
   const name = request.nextUrl.searchParams.get("name")?.trim();
   if (!address) return NextResponse.json({ error: "Thiếu địa chỉ" }, { status: 400 });
 

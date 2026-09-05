@@ -236,32 +236,65 @@ function wardForRestaurant(restaurant: Restaurant, wards: Ward[]) {
 
 function useSwipeToClose(onSwipe: () => void) {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const closing = useRef(false);
+  const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
   const begin = (x: number, y: number) => {
     touchStart.current = { x, y };
+    closing.current = false;
+    setDragging(true);
+    setOffset(0);
+  };
+  const move = (x: number, y: number) => {
+    if (!touchStart.current || closing.current) return;
+    const deltaX = x - touchStart.current.x;
+    const deltaY = y - touchStart.current.y;
+    // Only a deliberate left-swipe moves the page. Vertical scrolling remains native.
+    if (deltaX >= 0 || Math.abs(deltaY) >= Math.abs(deltaX)) return;
+    setOffset(deltaX);
   };
   const finish = (x: number, y: number) => {
     if (!touchStart.current) return;
     const deltaX = x - touchStart.current.x;
-    const deltaY = Math.abs(y - touchStart.current.y);
+    const deltaY = y - touchStart.current.y;
     touchStart.current = null;
-    // Either horizontal direction is accepted. This keeps the requested
-    // left-swipe behavior while also matching iOS users' right-swipe habit.
-    if (Math.abs(deltaX) >= 64 && deltaY < 72) onSwipe();
+    setDragging(false);
+    if (deltaX <= -88 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      closing.current = true;
+      setOffset(-window.innerWidth);
+      window.setTimeout(onSwipe, 220);
+      return;
+    }
+    setOffset(0);
   };
   return {
+    style: {
+      transform: `translate3d(${offset}px, 0, 0)`,
+      transition: dragging ? "none" : "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)",
+    },
     onPointerDown: (event: React.PointerEvent) => {
       if (event.pointerType === "touch") begin(event.clientX, event.clientY);
+    },
+    onPointerMove: (event: React.PointerEvent) => {
+      if (event.pointerType === "touch") move(event.clientX, event.clientY);
     },
     onPointerUp: (event: React.PointerEvent) => {
       if (event.pointerType === "touch") finish(event.clientX, event.clientY);
     },
     onPointerCancel: () => {
       touchStart.current = null;
+      setDragging(false);
+      setOffset(0);
     },
     onTouchStart: (event: React.TouchEvent) => {
       if ("PointerEvent" in window) return;
       const touch = event.changedTouches[0];
       begin(touch.clientX, touch.clientY);
+    },
+    onTouchMove: (event: React.TouchEvent) => {
+      if ("PointerEvent" in window) return;
+      const touch = event.changedTouches[0];
+      move(touch.clientX, touch.clientY);
     },
     onTouchEnd: (event: React.TouchEvent) => {
       if ("PointerEvent" in window) return;
@@ -275,41 +308,69 @@ function useBottomSheetDismiss(onDismiss: () => void) {
   const startY = useRef<number | null>(null);
   const dismissed = useRef(false);
   const [offset, setOffset] = useState(0);
-  const dismissIfDragged = (currentY: number) => {
+  const [dragging, setDragging] = useState(false);
+  const move = (currentY: number) => {
     if (dismissed.current || startY.current == null) return;
     const delta = Math.max(0, currentY - startY.current);
-    setOffset(Math.min(delta, 260));
-    if (delta > 110) {
-      dismissed.current = true;
-      window.setTimeout(onDismiss, 160);
-    }
+    // Follow the finger for the entire drag. Closing only happens on release.
+    setOffset(delta);
   };
-  const reset = () => { if (!dismissed.current) setOffset(0); startY.current = null; };
+  const finish = (currentY: number | null) => {
+    if (startY.current == null || dismissed.current) return;
+    const delta = currentY == null ? 0 : Math.max(0, currentY - startY.current);
+    startY.current = null;
+    setDragging(false);
+    if (delta >= 128) {
+      dismissed.current = true;
+      setOffset(window.innerHeight);
+      window.setTimeout(onDismiss, 220);
+      return;
+    }
+    setOffset(0);
+  };
+  const cancel = () => {
+    startY.current = null;
+    setDragging(false);
+    if (!dismissed.current) setOffset(0);
+  };
   return {
-    style: { transform: `translateY(${offset}px)`, transition: dismissed.current ? "transform 160ms ease-out" : "none" },
+    style: {
+      transform: `translate3d(0, ${offset}px, 0)`,
+      transition: dragging ? "none" : "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)",
+    },
     onPointerDown: (event: React.PointerEvent) => {
       if (event.pointerType === "touch") {
         startY.current = event.clientY;
         dismissed.current = false;
+        setDragging(true);
+        setOffset(0);
         event.currentTarget.setPointerCapture?.(event.pointerId);
       }
     },
     onPointerMove: (event: React.PointerEvent) => {
-      if (event.pointerType === "touch") dismissIfDragged(event.clientY);
+      if (event.pointerType === "touch") move(event.clientY);
     },
-    onPointerUp: () => {
-      reset();
+    onPointerUp: (event: React.PointerEvent) => {
+      if (event.pointerType === "touch") finish(event.clientY);
     },
-    onPointerCancel: reset,
+    onPointerCancel: cancel,
     onTouchStart: (event: React.TouchEvent) => {
+      if ("PointerEvent" in window) return;
       startY.current = event.touches[0]?.clientY ?? null;
       dismissed.current = false;
+      setDragging(true);
+      setOffset(0);
     },
     onTouchMove: (event: React.TouchEvent) => {
+      if ("PointerEvent" in window) return;
       const currentY = event.touches[0]?.clientY;
-      if (currentY != null) dismissIfDragged(currentY);
+      if (currentY != null) move(currentY);
     },
-    onTouchEnd: reset,
+    onTouchEnd: (event: React.TouchEvent) => {
+      if ("PointerEvent" in window) return;
+      finish(event.changedTouches[0]?.clientY ?? null);
+    },
+    onTouchCancel: cancel,
   };
 }
 
@@ -468,10 +529,10 @@ function RestaurantCard({
         {roadRoute ? (
           <div className="min-w-[72px] rounded-2xl bg-gradient-to-br from-[#a35e2d] to-[#e5a36a] px-2.5 py-2 text-center text-white shadow-sm">
             <span className="block text-[18px] font-extrabold leading-none">
-              {formatDistance(roadRoute.distanceKm)}
+              {roadRoute.isEstimated ? `≈ ${formatDistance(roadRoute.distanceKm)}` : formatDistance(roadRoute.distanceKm)}
             </span>
             <span className="mt-1 block text-[10px] font-bold leading-none opacity-90">
-              {roadRoute.isEstimated ? "ước tính" : ""}
+              {roadRoute.isEstimated ? "ước lượng, chưa có route" : "tuyến đường"}
             </span>
             {airDistance != null && (
               <span className="mt-1.5 flex items-center justify-center gap-1 text-[9px] font-medium leading-none opacity-80">
@@ -482,10 +543,10 @@ function RestaurantCard({
         ) : estimatedDistance != null ? (
           <div className="min-w-[72px] rounded-2xl bg-[#402c1e]/7 px-2.5 py-2 text-center text-[#402c1e] dark:bg-[#f7eadc]/10 dark:text-[#f7eadc]">
             <span className="block text-[15px] font-extrabold leading-none">
-              {formatDistance(estimatedDistance)}
+              ≈ {formatDistance(estimatedDistance)}
             </span>
             <span className="mt-1 block text-[10px] font-bold leading-none opacity-75">
-              ước tính
+              chưa có tuyến đường
             </span>
             {airDistance != null && (
               <span className="mt-1.5 flex items-center justify-center gap-1 text-[9px] font-medium leading-none opacity-65">
@@ -576,8 +637,18 @@ function RestaurantForm({
   const [error, setError] = useState<string | null>(null);
   const [clipboardReading, setClipboardReading] = useState(false);
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
-  const swipeHandlers = useSwipeToClose(onClose);
+  const formSheetRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const { style: swipeStyle, ...swipeHandlers } = useSwipeToClose(onClose);
   useModalBodyLock();
+  useEffect(() => {
+    if (restaurant) return;
+    formSheetRef.current?.scrollTo({ top: 0 });
+    const frame = window.requestAnimationFrame(() => {
+      nameInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [restaurant]);
   const candidates = useMemo(
     () => similarRestaurants(draft, restaurants, restaurant?.id),
     [draft, restaurants, restaurant?.id],
@@ -699,13 +770,12 @@ function RestaurantForm({
     <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-[#1c130d]/35 p-0 backdrop-blur-sm md:items-center md:p-6">
       <div
         {...swipeHandlers}
+        ref={formSheetRef}
+        style={swipeStyle}
         className="h-[100dvh] max-h-[100dvh] w-full max-w-xl touch-pan-y overflow-y-auto overscroll-contain bg-[#fbf3ea] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-2xl dark:bg-[#281b13] md:h-auto md:max-h-[92dvh] md:rounded-[20px] md:p-5"
       >
         <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-4 flex items-center justify-between border-b border-[#402c1e]/8 bg-[#fbf3ea]/95 px-4 pb-3 pt-[calc(1rem+env(safe-area-inset-top))] backdrop-blur-xl dark:bg-[#281b13]/95 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:backdrop-blur-none">
           <div>
-            <p className="mb-1 text-[10px] font-bold text-[#8a7360] md:hidden">
-              Vuốt ngang để quay lại
-            </p>
             <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">
               PROT FOOD
             </p>
@@ -725,7 +795,8 @@ function RestaurantForm({
           <Field label="Tên quán *">
             <input
               required
-              autoFocus
+              ref={nameInputRef}
+              autoFocus={!restaurant}
               value={draft.name}
               onChange={(e) => set("name", e.target.value)}
               className={inputClass}
@@ -941,20 +1012,19 @@ function Detail({
       <aside
           onTouchMove={(event) => event.stopPropagation()}
           style={sheetStyle}
-          className="isolate h-[88dvh] w-full max-w-xl touch-pan-y overscroll-contain overflow-y-auto rounded-t-[30px] bg-[#fbf3ea] px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl transition-transform dark:bg-[#281b13] md:h-full md:rounded-none md:py-6"
+          className="isolate h-[88dvh] w-full max-w-xl touch-pan-y overscroll-contain overflow-y-auto rounded-t-[30px] bg-[#fbf3ea] px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-[#281b13] md:h-full md:rounded-none md:py-6"
       >
         <div
           {...sheetDismissHandlers}
-          className="mx-auto mb-3 flex w-full touch-none cursor-grab flex-col items-center justify-center gap-1.5 py-1 md:hidden"
+          className="mx-auto mb-3 flex w-full touch-none cursor-grab items-center justify-center py-2 md:hidden"
           aria-label="Vuốt xuống để đóng"
         >
           <span className="h-2 w-16 rounded-full bg-[#a35e2d]/60 shadow-sm dark:bg-[#e5a36a]/65" />
-          <span className="text-[10px] font-bold text-[#8a7360]">Kéo xuống để đóng</span>
         </div>
-        <div className="sticky top-0 z-20 -mx-5 mb-6 flex items-center justify-between border-b border-[#402c1e]/10 bg-[#fbf3ea]/95 px-5 py-3 backdrop-blur dark:bg-[#281b13]/95 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
+        <div className="sticky top-0 z-20 -mx-5 mb-6 flex items-center justify-between border-b border-[#402c1e]/10 bg-[#fbf3ea]/95 px-3 py-3 backdrop-blur dark:bg-[#281b13]/95 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
           <button
             onClick={onClose}
-            className="flex items-center gap-1 rounded-xl bg-[#402c1e]/8 px-3 py-2 text-sm font-bold"
+            className="flex items-center gap-1 rounded-xl bg-[#402c1e]/8 px-2.5 py-2 text-sm font-bold"
           >
             <ChevronLeft size={18} />
             Quay lại
@@ -976,9 +1046,6 @@ function Detail({
             </button>
           </div>}
         </div>
-        <p className="mb-3 text-[10px] font-bold text-[#8a7360] md:hidden">
-          Kéo thanh phía trên xuống để đóng
-        </p>
         <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">
           CHI TIẾT QUÁN
         </p>
@@ -1792,7 +1859,15 @@ export default function Home() {
           estimatedDistance,
           roadRoute: position ? roadRoutes[item.id] : undefined,
         }))
-        .filter(({ roadRoute, estimatedDistance }) => quickFilter !== "nearest" || Boolean(roadRoute && roadRoute.distanceKm < 1.5) || (!position && estimatedDistance != null && estimatedDistance < 1.5))
+        .filter(
+          ({ roadRoute }) =>
+            quickFilter !== "nearest" ||
+            Boolean(
+              roadRoute &&
+                !roadRoute.isEstimated &&
+                roadRoute.distanceKm < 1.5,
+            ),
+        )
         .sort(
           (a, b) =>
             (a.roadRoute?.distanceKm ?? a.estimatedDistance ?? Infinity) -
