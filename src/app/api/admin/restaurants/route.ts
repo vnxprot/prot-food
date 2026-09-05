@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { isAdminRequest } from "@/lib/admin-session";
 
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -7,13 +8,8 @@ function adminClient() {
   return url && key ? createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } }) : null;
 }
 
-function authorized(request: NextRequest) {
-  const expected = process.env.ADMIN_PASSCODE?.trim();
-  return Boolean(expected && request.headers.get("x-admin-key") === expected);
-}
-
 export async function POST(request: NextRequest) {
-  if (!authorized(request)) return NextResponse.json({ error: "Admin required" }, { status: 401 });
+  if (!isAdminRequest(request)) return NextResponse.json({ error: "Admin required" }, { status: 401 });
   const client = adminClient();
   if (!client) return NextResponse.json({ error: "Missing Supabase service configuration" }, { status: 500 });
   const { payload } = await request.json();
@@ -23,7 +19,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  if (!authorized(request)) return NextResponse.json({ error: "Admin required" }, { status: 401 });
+  if (!isAdminRequest(request)) return NextResponse.json({ error: "Admin required" }, { status: 401 });
   const client = adminClient();
   if (!client) return NextResponse.json({ error: "Missing Supabase service configuration" }, { status: 500 });
   const { id, payload } = await request.json();
@@ -34,7 +30,7 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!authorized(request)) return NextResponse.json({ error: "Admin required" }, { status: 401 });
+  if (!isAdminRequest(request)) return NextResponse.json({ error: "Admin required" }, { status: 401 });
   const client = adminClient();
   if (!client) return NextResponse.json({ error: "Missing Supabase service configuration" }, { status: 500 });
   const id = request.nextUrl.searchParams.get("id");

@@ -683,16 +683,9 @@ function RestaurantForm({
         matchedWard?.id ||
         (shouldGeocode ? null : restaurant?.ward_id || null),
     };
-    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
     let saveError: { message: string } | null = null;
-    if (adminPin) {
-      const response = await fetch("/api/admin/restaurants", { method: restaurant ? "PATCH" : "POST", headers: { "Content-Type": "application/json", "x-admin-key": adminPin }, body: JSON.stringify(restaurant ? { id: restaurant.id, payload } : { payload }) });
-      if (!response.ok) saveError = { message: ((await response.json().catch(() => null)) as { error?: string } | null)?.error || "Không thể lưu quán." };
-    } else {
-      const query = restaurant ? supabase.from("restaurants").update(payload).eq("id", restaurant.id) : supabase.from("restaurants").insert(payload);
-      const result = await query;
-      saveError = result.error;
-    }
+    const response = await fetch("/api/admin/restaurants", { method: restaurant ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(restaurant ? { id: restaurant.id, payload } : { payload }) });
+    if (!response.ok) saveError = { message: ((await response.json().catch(() => null)) as { error?: string } | null)?.error || "Không thể lưu quán." };
     if (saveError) {
       setError(saveError.message);
       setSaving(false);
@@ -958,7 +951,7 @@ function Detail({
           <span className="h-2 w-16 rounded-full bg-[#a35e2d]/60 shadow-sm dark:bg-[#e5a36a]/65" />
           <span className="text-[10px] font-bold text-[#8a7360]">Kéo xuống để đóng</span>
         </div>
-        <div className="mb-6 flex items-center justify-between">
+        <div className="sticky top-0 z-20 -mx-5 mb-6 flex items-center justify-between border-b border-[#402c1e]/10 bg-[#fbf3ea]/95 px-5 py-3 backdrop-blur dark:bg-[#281b13]/95 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
           <button
             onClick={onClose}
             className="flex items-center gap-1 rounded-xl bg-[#402c1e]/8 px-3 py-2 text-sm font-bold"
@@ -966,17 +959,17 @@ function Detail({
             <ChevronLeft size={18} />
             Quay lại
           </button>
-          {isAdmin && <div className="flex gap-2">
+          {isAdmin && <div className="flex shrink-0 gap-2">
             <button
               onClick={onEdit}
-              className="rounded-xl bg-[#402c1e]/8 p-2.5"
+              className="rounded-xl bg-[#402c1e]/8 p-3"
               aria-label="Sửa"
             >
               <Pencil size={17} />
             </button>
             <button
               onClick={onDelete}
-              className="rounded-xl bg-red-900/10 p-2.5 text-red-800 dark:text-red-200"
+              className="rounded-xl bg-red-900/10 p-3 text-red-800 dark:text-red-200"
               aria-label="Xoá"
             >
               <Trash2 size={17} />
@@ -1520,26 +1513,24 @@ export default function Home() {
         /* Ignore invalid local storage. */
       }
     }
-    const params = new URLSearchParams(window.location.search);
-    const adminParam = params.get("admin");
-    if (window.localStorage.getItem("prot-food-admin-v1") === "1" && window.localStorage.getItem("prot-food-admin-pin")) setIsAdmin(true);
-    else window.localStorage.removeItem("prot-food-admin-v1");
-    if (adminParam) void loginWithPin(adminParam, true);
+    fetch("/api/admin/verify")
+      .then((response) => response.ok ? response.json() : null)
+      .then((body: { admin?: boolean } | null) => setIsAdmin(Boolean(body?.admin)))
+      .catch(() => setIsAdmin(false));
   }, []);
   const chooseCollections = (ids: string[]) => {
     setSelectedCollectionIds(ids);
     window.localStorage.setItem("prot-food-collections-v1", JSON.stringify(ids));
   };
-  const loginWithPin = async (inputPin?: string, fromBookmark = false) => {
+  const loginWithPin = async (inputPin?: string) => {
     const pin = inputPin || window.prompt("Nhập mã PIN Quản trị viên (6 số):");
     if (!pin) return;
     const response = await fetch("/api/admin/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) });
-    if (response.ok) { setIsAdmin(true); window.localStorage.setItem("prot-food-admin-v1", "1"); window.localStorage.setItem("prot-food-admin-pin", pin); notify(fromBookmark ? "Đã kích hoạt Admin từ bookmark." : "Đã mở khóa quyền Admin thành công!"); }
+    if (response.ok) { setIsAdmin(true); notify("Đã mở khóa quyền Admin thành công!"); }
     else notify("Mã PIN không chính xác hoặc chưa cấu hình.");
   };
   const signOutAdmin = async () => {
-    window.localStorage.removeItem("prot-food-admin-v1");
-    window.localStorage.removeItem("prot-food-admin-pin");
+    await fetch("/api/admin/verify", { method: "DELETE" });
     setIsAdmin(false);
     notify("Đã đăng xuất quản trị.");
   };
@@ -1829,10 +1820,7 @@ export default function Home() {
     update: Record<string, unknown>,
   ) {
     if (!supabase) return;
-    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
-    const error = adminPin
-      ? await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json", "x-admin-key": adminPin }, body: JSON.stringify({ id: restaurant.id, payload: update }) }).then(async (response) => response.ok ? null : new Error((((await response.json().catch(() => null)) as { error?: string } | null)?.error) || "Không thể cập nhật quán."))
-      : (await supabase.from("restaurants").update(update).eq("id", restaurant.id)).error;
+    const error = await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: restaurant.id, payload: update }) }).then(async (response) => response.ok ? null : new Error((((await response.json().catch(() => null)) as { error?: string } | null)?.error) || "Không thể cập nhật quán."));
     if (error) return notify(error.message);
     const next = { ...restaurant, ...update } as Restaurant;
     setSelected(next);
@@ -1891,10 +1879,7 @@ export default function Home() {
         taste_rating: null,
         price_level: null,
       };
-    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
-    const resetError = adminPin
-      ? await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json", "x-admin-key": adminPin }, body: JSON.stringify({ id: restaurant.id, payload: resetPayload }) }).then(async (response) => response.ok ? null : new Error("Không thể cập nhật lịch sử."))
-      : (await supabase.from("restaurants").update(resetPayload).eq("id", restaurant.id)).error;
+    const resetError = await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: restaurant.id, payload: resetPayload }) }).then(async (response) => response.ok ? null : new Error("Không thể cập nhật lịch sử."));
     if (resetError) {
       notify(resetError.message);
       return false;
@@ -1922,10 +1907,7 @@ export default function Home() {
       !window.confirm(`Xoá “${selected.name}”? Không thể hoàn tác.`)
     )
       return;
-    const adminPin = window.localStorage.getItem("prot-food-admin-pin");
-    const error = adminPin
-      ? await fetch(`/api/admin/restaurants?id=${encodeURIComponent(selected.id)}`, { method: "DELETE", headers: { "x-admin-key": adminPin } }).then(async (response) => response.ok ? null : new Error("Không thể xóa quán."))
-      : (await supabase.from("restaurants").delete().eq("id", selected.id)).error;
+    const error = await fetch(`/api/admin/restaurants?id=${encodeURIComponent(selected.id)}`, { method: "DELETE" }).then(async (response) => response.ok ? null : new Error("Không thể xóa quán."));
     if (error) return notify(error.message);
     setSelected(null);
     await refresh();
