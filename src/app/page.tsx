@@ -20,6 +20,7 @@ import {
   FileType2,
   Flame,
   Loader2,
+  List,
   MapPin,
   Navigation,
   Pencil,
@@ -60,7 +61,8 @@ import {
   makeLocationReport,
 } from "@/lib/report-export";
 
-type Tab = "nearby" | "profile" | "roulette" | "settings";
+type Tab = "nearby" | "list" | "roulette" | "settings";
+type SettingsTab = "data" | "account";
 type FilterStatus = "all" | Status;
 type Position = { lat: number; lng: number };
 type RoadRoute = { distanceKm: number; isEstimated?: boolean };
@@ -1411,6 +1413,7 @@ function ReportView({
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("nearby");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("data");
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
@@ -1461,6 +1464,7 @@ export default function Home() {
     setQuickFilter("all");
     setWardPickerOpen(false);
     setTab(nextTab);
+    if (nextTab === "settings") setSettingsTab("data");
   };
   const setPreferredTravelMode = (mode: TravelMode) => {
     setTravelMode(mode);
@@ -2002,15 +2006,15 @@ export default function Home() {
   );
   const navItems = [
     { id: "nearby" as const, label: "Gần đây", icon: Compass },
-    { id: "profile" as const, label: "Thống kê", icon: Flame },
+    { id: "list" as const, label: "Danh sách", icon: List },
     { id: "roulette" as const, label: collections.length && selectedCollectionIds.length && selectedCollectionIds.every((id) => collections.find((item) => item.id === id)?.type === "cafe") ? "Uống gì?" : "Ăn gì?", icon: Dices },
     { id: "settings" as const, label: "Cài đặt", icon: Settings },
   ];
   const pageTitle =
     tab === "nearby"
       ? "Gần đây"
-        : tab === "profile"
-          ? "Thống kê"
+        : tab === "list"
+          ? "Danh sách"
         : tab === "roulette"
           ? collections.length && selectedCollectionIds.length && selectedCollectionIds.every((id) => collections.find((item) => item.id === id)?.type === "cafe") ? "Hôm nay uống gì?" : "Hôm nay ăn gì?"
         : tab === "settings"
@@ -2019,7 +2023,7 @@ export default function Home() {
   const pageSubtitle =
     tab === "nearby"
       ? "Quán quanh vị trí hiện tại của bạn"
-        : tab === "profile"
+        : tab === "list"
         ? `${restaurants.length} quán · ${visited.length} đã đến`
         : tab === "roulette"
           ? "Một gợi ý hợp thời điểm, hợp vị trí"
@@ -2186,7 +2190,7 @@ export default function Home() {
               </div>
             </div>
           )}
-          {tab === "settings" && (
+          {tab === "list" && (
             <div>
               <div className="glass mb-4 flex items-center gap-2 rounded-2xl px-4 py-3">
                 <Search size={18} className="shrink-0 text-[#a35e2d]" />
@@ -2232,46 +2236,29 @@ export default function Home() {
           )}
           {tab === "settings" && (
             <div className="space-y-4">
+              <div className="flex gap-2 rounded-2xl bg-[#402c1e]/6 p-1 dark:bg-white/8">
+                <button type="button" onClick={() => setSettingsTab("data")} className={`flex-1 rounded-xl px-3 py-2 text-sm font-extrabold ${settingsTab === "data" ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}>Dữ liệu</button>
+                <button type="button" onClick={() => setSettingsTab("account")} className={`flex-1 rounded-xl px-3 py-2 text-sm font-extrabold ${settingsTab === "account" ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}>Tài khoản</button>
+              </div>
+              {settingsTab === "data" && <>
+              <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Nguồn dữ liệu đang xem</p><p className="mt-1 text-xs text-[#8a7360]">Bật/tắt từng nguồn. Lựa chọn lưu riêng trên thiết bị và áp dụng cho các tab.</p><div className="mt-3"><CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} /></div></section>
+              <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Chỉ đường mặc định</p><p className="mt-1 text-xs text-[#8a7360]">Dùng khi mở Google Maps.</p><div className="mt-3 flex gap-2"><Chip active={travelMode === "two-wheeler"} onClick={() => setPreferredTravelMode("two-wheeler")}><Bike className="mr-1 inline" size={14} /> Xe máy</Chip><Chip active={travelMode === "driving"} onClick={() => setPreferredTravelMode("driving")}><CarFront className="mr-1 inline" size={14} /> Ô tô</Chip></div></section>
+              <details className="glass rounded-[20px] p-4"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold"><FileCheck2 size={17} className="text-[#a35e2d]" />Báo cáo chất lượng tọa độ & xuất dữ liệu</summary><div className="mt-4"><ReportView restaurants={restaurants} notify={notify} /></div></details>
+              </>}
+              {settingsTab === "account" && <>
               <section className={`rounded-[20px] border p-4 ${isAdmin ? "border-[#a35e2d]/45 bg-[#a35e2d]/12" : "border-[#402c1e]/12 bg-white/45 dark:bg-black/10"}`}>
                 <p className="text-sm font-extrabold">{isAdmin ? "👑 Bạn đang là Admin Prot" : "👀 Bạn đang ở chế độ Viewer"}</p>
                 <p className="mt-1 text-xs leading-relaxed text-[#8a7360]">{isAdmin ? "Bạn có thể thêm quán, sửa/xóa dữ liệu và nạp nguồn Excel hoặc Google Sheets." : "Bạn có thể tìm, xem chỉ đường và quay Roulette. Các nút quản trị được ẩn."}</p>
                 <button type="button" onClick={isAdmin ? signOutAdmin : () => void loginWithPin()} className="mt-3 rounded-xl bg-[#402c1e] px-3 py-2 text-xs font-bold text-white">{isAdmin ? "Đăng xuất Admin" : "Nhập PIN 6 số để mở khóa"}</button>
               </section>
-              <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Nguồn dữ liệu đang xem</p><p className="mt-1 text-xs text-[#8a7360]">Bật/tắt từng nguồn. Lựa chọn lưu riêng trên thiết bị và áp dụng cho các tab.</p><div className="mt-3"><CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} /></div></section>
-              <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Chỉ đường mặc định</p><p className="mt-1 text-xs text-[#8a7360]">Dùng khi mở Google Maps.</p><div className="mt-3 flex gap-2"><Chip active={travelMode === "two-wheeler"} onClick={() => setPreferredTravelMode("two-wheeler")}><Bike className="mr-1 inline" size={14} /> Xe máy</Chip><Chip active={travelMode === "driving"} onClick={() => setPreferredTravelMode("driving")}><CarFront className="mr-1 inline" size={14} /> Ô tô</Chip></div></section>
-              <FoodFootprint restaurants={restaurants} onOpen={setSelected} />
-              <details className="glass rounded-[20px] p-4"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold"><FileCheck2 size={17} className="text-[#a35e2d]" />Báo cáo chất lượng tọa độ & xuất dữ liệu</summary><div className="mt-4"><ReportView restaurants={restaurants} notify={notify} /></div></details>
-            </div>
-          )}
-          {tab === "profile" && (
-            <div className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Stat
-                  label="Đã đến"
-                  value={visited.length}
-                  detail={`trên ${restaurants.length} quán`}
-                  tone="text-[#a35e2d]"
-                />
-                <Stat
-                  label="Muốn đến"
-                  value={restaurants.length - visited.length}
-                  detail="đã lưu để thử"
-                  tone="text-[#402c1e] dark:text-[#f7eadc]"
-                />
-                <Stat
-                  label="Ngon"
-                  value={good.length}
-                  detail="quán bạn muốn nhớ"
-                  tone="text-emerald-700 dark:text-emerald-300"
-                />
-                <Stat
-                  label="Không ngon"
-                  value={bad.length}
-                  detail="để tránh lần sau"
-                  tone="text-red-700 dark:text-red-300"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <Stat label="Đã đến" value={visited.length} detail={`trên ${restaurants.length} quán`} tone="text-[#a35e2d]" />
+                <Stat label="Muốn đến" value={restaurants.length - visited.length} detail="đã lưu để thử" tone="text-[#402c1e] dark:text-[#f7eadc]" />
+                <Stat label="Ngon" value={good.length} detail="quán bạn muốn nhớ" tone="text-emerald-700 dark:text-emerald-300" />
+                <Stat label="Không ngon" value={bad.length} detail="để tránh lần sau" tone="text-red-700 dark:text-red-300" />
               </div>
               <FoodFootprint restaurants={restaurants} onOpen={setSelected} />
+              </>}
             </div>
           )}
           {tab === "roulette" && (
