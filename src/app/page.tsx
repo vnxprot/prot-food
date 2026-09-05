@@ -2131,13 +2131,13 @@ export default function Home() {
               Thêm quán mới
             </button>}
           <p className="mt-auto px-3 text-xs leading-relaxed text-[#8a7360]">
-            PWA cá nhân · không có bản đồ trong app.<br />v3.2.0
+            PWA cá nhân · không có bản đồ trong app.<br />v3.3.0
           </p>
         </aside>
         <section className="min-w-0 flex-1 px-4 pb-28 pt-6 sm:px-6 md:px-10 md:pb-10">
           <header className="mb-5">
             <p className="text-[11px] font-extrabold tracking-[0.18em] text-[#a35e2d] md:hidden">
-              PROT FOOD · v3.2.0
+              PROT FOOD · v3.3.0
             </p>
             <h1 className="mt-1 text-3xl font-extrabold tracking-tight">
               {pageTitle}
@@ -2159,74 +2159,80 @@ export default function Home() {
           )}
           {tab === "nearby" && (
             <div>
-              <div className="glass mb-4 rounded-[20px] p-4">
-                <div className="flex items-center gap-3">
-                  <div className="rounded-xl bg-[#a35e2d]/12 p-2.5 text-[#a35e2d]">
-                    <Navigation size={18} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-bold">
-                      {position
-                        ? "Đang dùng vị trí hiện tại"
-                        : "Chưa có vị trí"}
-                    </p>
-                    <p className="mt-0.5 text-xs text-[#8a7360]">
-                      {position
-                        ? routingState === "loading"
-                          ? "Đang tính quãng đường theo mạng lưới đường…"
-                          : routingState === "ready"
-                            ? `${Object.keys(roadRoutes).length} quán gần nhất có quãng đường đi`
-                            : routingState === "unavailable"
-                              ? "Tạm dùng khoảng cách đường thẳng"
-                              : `${nearby.filter((item) => item.airDistance != null).length} quán có thể tính khoảng cách`
-                        : locationError || "Đang xin quyền vị trí…"}
-                    </p>
-                  </div>
-                  <button
-                    onClick={getLocation}
-                    className="rounded-xl bg-[#402c1e]/8 p-2.5"
-                    aria-label="Lấy lại vị trí"
-                  >
-                    <RefreshCw size={17} />
-                  </button>
-                </div>
-                {position && (
-                  <>
-                    <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[#402c1e]/5 px-3 py-2.5 dark:bg-[#f7eadc]/8">
-                      <div>
-                        <p className="text-xs font-bold">Chỉ đường mặc định</p>
-                        <p className="mt-0.5 text-[11px] text-[#8a7360]">
-                          Google Maps dùng vị trí hiện tại của máy
-                        </p>
-                      </div>
-                      <div className="flex rounded-lg bg-white/70 p-0.5 dark:bg-black/10">
-                        <button
-                          onClick={() => setPreferredTravelMode("two-wheeler")}
-                          className={`rounded-md px-2 py-1.5 text-[11px] font-bold ${travelMode === "two-wheeler" ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
-                        >
-                          <Bike className="mr-1 inline" size={13} /> Xe máy
-                        </button>
-                        <button
-                          onClick={() => setPreferredTravelMode("driving")}
-                          className={`rounded-md px-2 py-1.5 text-[11px] font-bold ${travelMode === "driving" ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}
-                        >
-                          <CarFront className="mr-1 inline" size={13} /> Ô tô
-                        </button>
-                      </div>
+              <div className="glass mb-4 rounded-[20px] p-3 backdrop-blur-md">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="relative flex items-center justify-center shrink-0">
+                      {position ? (
+                        <>
+                          <span className="absolute inline-flex h-3 w-3 animate-ping rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                        </>
+                      ) : (
+                        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+                      )}
                     </div>
-                    <p className="mt-2 text-[11px] leading-relaxed text-[#8a7360]">
-                      “Đường đi” ưu tiên dữ liệu OSM; khi dịch vụ bận, ứng dụng tự ước tính đường vòng qua sông hồ và không gồm kẹt xe.
-                    </p>
-                  </>
-                )}
+
+                    <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                      <p className="text-xs font-bold text-[#402c1e] dark:text-[#f7eadc] truncate">
+                        {position
+                          ? routingState === "loading"
+                            ? "Đang tính khoảng cách…"
+                            : routingState === "ready"
+                              ? "Vị trí hiện tại"
+                              : "Dùng khoảng cách đường thẳng"
+                          : locationError || "Chưa có vị trí"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={getLocation}
+                        className="rounded-lg bg-[#402c1e]/8 p-1.5 text-[#6b5644] hover:bg-[#402c1e]/15 dark:bg-white/10 dark:text-[#cbb4a0] transition"
+                        aria-label="Lấy lại vị trí"
+                        title="Lấy lại vị trí GPS"
+                      >
+                        <RefreshCw size={14} className={routingState === "loading" ? "animate-spin" : ""} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {position && (
+                    <div className="flex items-center rounded-xl bg-[#402c1e]/8 p-1 dark:bg-white/10 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setPreferredTravelMode("two-wheeler")}
+                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                          travelMode === "two-wheeler"
+                            ? "bg-white text-[#402c1e] shadow-xs dark:bg-[#402c1e] dark:text-[#f7eadc]"
+                            : "text-[#8a7360] hover:text-[#402c1e] dark:text-[#cbb4a0]"
+                        }`}
+                      >
+                        <Bike size={13} />
+                        <span>Xe máy</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPreferredTravelMode("driving")}
+                        className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                          travelMode === "driving"
+                            ? "bg-white text-[#402c1e] shadow-xs dark:bg-[#402c1e] dark:text-[#f7eadc]"
+                            : "text-[#8a7360] hover:text-[#402c1e] dark:text-[#cbb4a0]"
+                        }`}
+                      >
+                        <CarFront size={13} />
+                        <span>Ô tô</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {!position && wardOptions.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setWardPickerOpen(true)}
-                    className="mt-3 flex w-full items-center justify-between rounded-xl bg-[#402c1e]/6 px-3 py-2.5 text-left text-xs font-bold dark:bg-white/8"
+                    className="mt-2.5 flex w-full items-center justify-between rounded-xl bg-[#402c1e]/6 px-3 py-2 text-left text-xs font-bold dark:bg-white/8 text-[#402c1e] dark:text-[#f7eadc]"
                   >
-                    <span>{ward === "all" ? "Hoặc chọn phường / xã để lọc gần đúng" : ward}</span>
-                    <Search size={15} className="text-[#a35e2d]" />
+                    <span className="truncate">{ward === "all" ? "Chọn phường / xã để lọc gần đúng" : ward}</span>
+                    <Search size={14} className="text-[#a35e2d] shrink-0 ml-2" />
                   </button>
                 )}
               </div>
