@@ -1522,7 +1522,8 @@ export default function Home() {
     }
     const params = new URLSearchParams(window.location.search);
     const adminParam = params.get("admin");
-    if (window.localStorage.getItem("prot-food-admin-v1") === "1") setIsAdmin(true);
+    if (window.localStorage.getItem("prot-food-admin-v1") === "1" && window.localStorage.getItem("prot-food-admin-pin")) setIsAdmin(true);
+    else window.localStorage.removeItem("prot-food-admin-v1");
     if (adminParam) void loginWithPin(adminParam, true);
   }, []);
   const chooseCollections = (ids: string[]) => {
