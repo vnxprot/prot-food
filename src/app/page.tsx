@@ -1789,7 +1789,7 @@ export default function Home() {
           estimatedDistance,
           roadRoute: position ? roadRoutes[item.id] : undefined,
         }))
-        .filter(({ item, roadRoute, estimatedDistance }) => quickFilter !== "nearest" || Boolean(roadRoute && roadRoute.distanceKm < 1.5) || (!position && estimatedDistance != null && estimatedDistance < 1.5))
+        .filter(({ roadRoute, estimatedDistance }) => quickFilter !== "nearest" || Boolean(roadRoute && roadRoute.distanceKm < 1.5) || (!position && estimatedDistance != null && estimatedDistance < 1.5))
         .sort(
           (a, b) =>
             (a.roadRoute?.distanceKm ?? a.estimatedDistance ?? Infinity) -
