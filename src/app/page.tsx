@@ -198,9 +198,16 @@ function findWard(wardName: string | null, wards: Ward[]) {
 }
 
 function addressAlreadyIncludesWard(address: string, ward?: string) {
-  return ward
-    ? normalizeWardKey(address).includes(normalizeWardKey(ward))
-    : false;
+  if (!ward) return false;
+  const wardName = normalizeWardKey(ward);
+  if (!wardName) return false;
+  const wardPrefix = /^(xã|xa)\b/iu.test(ward) ? "(?:xa|x)" : "(?:phuong|p)";
+  const escapedWardName = wardName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // A street can share its name with a ward (for example Đường Láng and
+  // Phường Láng). Suppress the suffix only for an explicit ward marker.
+  return new RegExp(`(?:^|\\s)${wardPrefix}\\s+${escapedWardName}(?:\\s|$)`).test(
+    normalizeSearchText(address),
+  );
 }
 
 function displayWardName(ward: Ward | null | undefined) {
