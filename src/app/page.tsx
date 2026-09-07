@@ -1493,6 +1493,7 @@ export default function Home() {
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [editingCollection, setEditingCollection] = useState<Collection | null>(null);
   const [adminWards, setAdminWards] = useState<Ward[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1607,6 +1608,14 @@ export default function Home() {
     await fetch("/api/admin/verify", { method: "DELETE" });
     setIsAdmin(false);
     notify("Đã đăng xuất quản trị.");
+  };
+  const deleteCollection = async (collection: Collection) => {
+    if (!window.confirm(`Xóa nguồn “${collection.name}” và toàn bộ quán thuộc nguồn này? Không thể hoàn tác.`)) return;
+    const response = await fetch(`/api/admin/collections?id=${encodeURIComponent(collection.id)}`, { method: "DELETE" });
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    if (!response.ok) return notify(body?.error || "Không thể xóa nguồn dữ liệu.");
+    await refresh();
+    notify(`Đã xóa nguồn ${collection.name}.`);
   };
   useEffect(() => {
     if (!navigator.clipboard?.readText) return;
@@ -2327,7 +2336,7 @@ export default function Home() {
                 <button type="button" onClick={() => setSettingsTab("account")} className={`flex-1 rounded-xl px-3 py-2 text-sm font-extrabold ${settingsTab === "account" ? "bg-[#402c1e] text-[#fbf3ea]" : "text-[#6b5644] dark:text-[#cbb4a0]"}`}>Tài khoản</button>
               </div>
               {settingsTab === "data" && <>
-              <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Nguồn dữ liệu đang xem</p><p className="mt-1 text-xs text-[#8a7360]">Bật/tắt từng nguồn. Lựa chọn lưu riêng trên thiết bị và áp dụng cho các tab.</p><div className="mt-3"><CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} /></div></section>
+              <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Nguồn dữ liệu đang xem</p><p className="mt-1 text-xs text-[#8a7360]">Bật/tắt từng nguồn. Lựa chọn lưu riêng trên thiết bị và áp dụng cho các tab.</p><div className="mt-3"><CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} onEdit={setEditingCollection} onDelete={(collection) => void deleteCollection(collection)} /></div></section>
               <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Chỉ đường mặc định</p><p className="mt-1 text-xs text-[#8a7360]">Dùng khi mở Google Maps.</p><div className="mt-3 flex gap-2"><Chip active={travelMode === "two-wheeler"} onClick={() => setPreferredTravelMode("two-wheeler")}><Bike className="mr-1 inline" size={14} /> Xe máy</Chip><Chip active={travelMode === "driving"} onClick={() => setPreferredTravelMode("driving")}><CarFront className="mr-1 inline" size={14} /> Ô tô</Chip></div></section>
               <details className="glass rounded-[20px] p-4"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold"><FileCheck2 size={17} className="text-[#a35e2d]" />Báo cáo chất lượng tọa độ & xuất dữ liệu</summary><div className="mt-4"><ReportView restaurants={restaurants} notify={notify} /></div></details>
               </>}
@@ -2421,7 +2430,7 @@ export default function Home() {
           onSaved={afterSave}
         />
       )}
-      {importOpen && <CollectionImportModal onClose={() => setImportOpen(false)} onDone={refresh} />}
+      {(importOpen || editingCollection) && <CollectionImportModal collection={editingCollection} onClose={() => { setImportOpen(false); setEditingCollection(null); }} onDone={refresh} />}
       {toast && (
         <div className="fixed bottom-24 left-1/2 z-[70] -translate-x-1/2 rounded-full bg-[#402c1e] px-4 py-2 text-sm font-bold text-[#fbf3ea] shadow-xl md:bottom-6">
           {toast}
