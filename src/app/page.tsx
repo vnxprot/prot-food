@@ -215,18 +215,27 @@ function displayAddress(address: string, wardName?: string | null) {
     .replace(/\s{2,}/g, " ")
     .replace(/\s*,\s*$/g, "")
     .trim();
-  if (escapedWard) {
+  if (bareWard && escapedWard) {
+    const wardKey = normalizeWardKey(bareWard);
     result = result
-      // The card owns the only rendered ward suffix. Remove every imported
-      // spelling of that same ward, then append the canonical label once.
-      .replace(new RegExp(`,?\\s*(?:phường|phuong|p\\.?|xã|xa)\\s+${escapedWard}\\b`, "giu"), "")
-      .replace(new RegExp(`(?:,?\\s*${escapedWard})+\\s*$`, "giu"), "")
-      .replace(/,\s*,+/g, ",")
-      .replace(/\s{2,}/g, " ")
-      .replace(/\s*,\s*$/g, "")
-      .trim();
+      .replace(new RegExp(`(?:^|,|\\s)(?:phường|phuong|p\\.?|xã|xa)\\s+${escapedWard}\\b`, "giu"), ",")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part) => {
+        const partKey = normalizeWardKey(part).replace(/^(phuong|p|xa|x)\s+/, "");
+        return partKey !== wardKey;
+      })
+      .join(", ");
   }
-  return result;
+  // P. is ambiguous in source spreadsheets; render it in full as "Phố" so
+  // compact cards never show an unexplained abbreviation.
+  return result
+    .replace(/\bP\.\s*/gu, "Phố ")
+    .replace(/,\s*,+/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s*,\s*$/g, "")
+    .trim();
 }
 
 function findWardFromAddress(addressRaw: string | null | undefined, wards: Ward[]) {
