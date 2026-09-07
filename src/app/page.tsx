@@ -1507,6 +1507,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [position, setPosition] = useState<Position | null>(null);
+  const [locationPermission, setLocationPermission] = useState<"idle" | "requesting" | "granted" | "denied" | "unavailable" | "timeout">("idle");
   const [routingPosition, setRoutingPosition] = useState<Position | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [roadRoutes, setRoadRoutes] = useState<Record<string, RoadRoute>>({});
@@ -1658,17 +1659,25 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [search]);
   const getLocation = useCallback(() => {
-    if (!navigator.geolocation)
+    if (!navigator.geolocation) {
+      setLocationPermission("unavailable");
       return setLocationError("Trình duyệt này không hỗ trợ vị trí.");
+    }
     if (locationWatchRef.current != null)
       navigator.geolocation.clearWatch(locationWatchRef.current);
     setLocationError(null);
+    setLocationPermission("requesting");
     const onPosition = (result: GeolocationPosition) =>
-      setPosition({ lat: result.coords.latitude, lng: result.coords.longitude });
-    const onError = () =>
-        setLocationError(
-          "Chưa lấy được vị trí. Bạn có thể chọn phường/xã để lọc gần đúng.",
-        );
+      { setPosition({ lat: result.coords.latitude, lng: result.coords.longitude }); setLocationPermission("granted"); };
+    const onError = (error: GeolocationPositionError) => {
+      const permission = error.code === 1 ? "denied" : error.code === 3 ? "timeout" : "unavailable";
+      setLocationPermission(permission);
+      setLocationError(
+        error.code === 1
+          ? "Quyền vị trí đang bị chặn. Hãy bấm Cho phép vị trí hoặc bật quyền vị trí cho Safari trong Cài đặt."
+          : "Chưa lấy được vị trí. Kiểm tra GPS rồi thử lại.",
+      );
+    };
     const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
     navigator.geolocation.getCurrentPosition(onPosition, onError, options);
     locationWatchRef.current = navigator.geolocation.watchPosition(onPosition, onError, options);
@@ -2228,11 +2237,11 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={getLocation}
-                        className="rounded-lg bg-[#402c1e]/8 p-1.5 text-[#6b5644] hover:bg-[#402c1e]/15 dark:bg-white/10 dark:text-[#cbb4a0] transition"
-                        aria-label="Lấy lại vị trí"
+                        className={`rounded-lg px-2.5 py-1.5 text-xs font-extrabold transition ${position ? "bg-[#402c1e]/8 p-1.5 text-[#6b5644] hover:bg-[#402c1e]/15 dark:bg-white/10 dark:text-[#cbb4a0]" : "bg-[#a35e2d] text-white shadow-sm hover:bg-[#7f421e]"}`}
+                        aria-label={position ? "Lấy lại vị trí" : "Cho phép vị trí"}
                         title="Lấy lại vị trí GPS"
                       >
-                        <RefreshCw size={14} className={routingState === "loading" ? "animate-spin" : ""} />
+                        {position ? <RefreshCw size={14} className={routingState === "loading" ? "animate-spin" : ""} /> : "Cho phép vị trí"}
                       </button>
                     </div>
                   </div>
@@ -2276,6 +2285,12 @@ export default function Home() {
                     <span className="truncate">{ward === "all" ? "Chọn phường / xã để lọc gần đúng" : ward}</span>
                     <Search size={14} className="text-[#a35e2d] shrink-0 ml-2" />
                   </button>
+                )}
+                {!position && locationPermission !== "requesting" && (
+                  <div className="mt-2.5 rounded-xl border border-[#a35e2d]/20 bg-[#a35e2d]/8 px-3 py-2.5 text-xs text-[#70421f] dark:text-[#f7eadc]">
+                    <p className="font-extrabold">{locationPermission === "denied" ? "Safari chưa được cấp quyền vị trí" : "Bật vị trí để xem khoảng cách"}</p>
+                    <p className="mt-1 leading-relaxed opacity-80">Bấm <span className="font-bold">Cho phép vị trí</span> để app hỏi lại GPS trên thiết bị này.</p>
+                  </div>
                 )}
               </div>
               <SectionTitle>Lọc theo ngữ cảnh</SectionTitle>
