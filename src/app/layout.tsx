@@ -10,7 +10,7 @@ const beVietnamPro = Be_Vietnam_Pro({
 });
 
 export const metadata: Metadata = {
-  title: "Prot Food v3.0 — Smart Neo-Glass",
+  title: "Prot Food v3.3 — Smart Neo-Glass",
   description: "Trợ lý ẩm thực cá nhân thông minh của Prot tại Hà Nội.",
   manifest: "/manifest.json",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "Prot Food" },

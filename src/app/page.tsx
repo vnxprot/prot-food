@@ -228,6 +228,9 @@ function displayAddress(address: string, wardName?: string | null) {
   if (escapedWard) {
     result = result
       .replace(new RegExp(`,?\\s*(?:phường|phuong|p\\.?|xã|xa)\\s+${escapedWard}\\b`, "giu"), "")
+      // If the final locality repeats the ward shown separately on the card,
+      // keep the standard "Phường/Xã …" suffix and remove the duplicate.
+      .replace(new RegExp(`,?\\s*${escapedWard}\\s*$`, "giu"), "")
       .replace(/\s{2,}/g, " ")
       .replace(/\s*,\s*$/g, "")
       .trim();
