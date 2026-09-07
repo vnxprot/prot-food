@@ -219,8 +219,11 @@ function displayWardName(ward: Ward | null | undefined) {
 
 function displayAddress(address: string, wardName?: string | null) {
   if (!wardName) return address;
+  const bareWard = wardName.replace(/^(phường|phuong|xã|xa)\s+/i, "").trim();
+  const escapedWard = bareWard.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return address
     .replace(/,?\s*(?:hà nội|ha noi|việt nam|viet nam)\b/giu, "")
+    .replace(new RegExp(`,?\\s*(?:phường|phuong|p\\.?|xã|xa)\\s+${escapedWard}\\b`, "giu"), "")
     .replace(/\s{2,}/g, " ")
     .replace(/\s*,\s*$/g, "")
     .trim();
