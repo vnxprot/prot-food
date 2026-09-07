@@ -1653,17 +1653,24 @@ export default function Home() {
       locationWatchRef.current = null;
     };
   }, [tab, getLocation]);
+  const selectedRestaurants = useMemo(
+    () => restaurants.filter((item) => selectedCollectionIds.length === 0 || selectedCollectionIds.includes(item.collection_id || "prot_food")),
+    [restaurants, selectedCollectionIds],
+  );
   const categories = useMemo(
     () =>
       [
         ...new Set(
-          restaurants
+          selectedRestaurants
             .map((item) => item.category)
             .filter((item): item is string => Boolean(item)),
         ),
       ].sort((a, b) => a.localeCompare(b, "vi")),
-    [restaurants],
+    [selectedRestaurants],
   );
+  useEffect(() => {
+    if (category !== "all" && !categories.includes(category)) setCategory("all");
+  }, [categories, category]);
   const visibleCategories = useMemo(() => {
     const query = normalizeSearchText(categoryFilterSearch);
     const matching = query
@@ -1675,10 +1682,9 @@ export default function Home() {
   }, [categories, category, categoryFilterSearch, showAllCategories]);
   const filtered = useMemo(
     () =>
-      restaurants.filter((item) => {
+      selectedRestaurants.filter((item) => {
         const resolvedWard = wardForRestaurant(item, adminWards);
         return (
-          (selectedCollectionIds.length === 0 || selectedCollectionIds.includes(item.collection_id || "prot_food")) &&
           matchesSearchQuery(
             [
               item.name,
@@ -1695,7 +1701,7 @@ export default function Home() {
           (ward === "all" || resolvedWard?.name === ward)
         );
       }),
-    [restaurants, adminWards, selectedCollectionIds, searchQuery, status, category, ward],
+    [selectedRestaurants, adminWards, searchQuery, status, category, ward],
   );
   const contextFiltered = useMemo(
     () =>

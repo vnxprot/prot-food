@@ -1,6 +1,5 @@
 import * as XLSX from "xlsx";
 import { decodePlusCode, extractPlusCode } from "./plus-codes";
-import { supabase } from "./supabase";
 
 export type ImportMapping = Partial<Record<"name" | "address" | "category" | "notes" | "coordinates", string>>;
 export type ImportRow = Record<string, unknown>;
@@ -43,8 +42,7 @@ function coordinates(raw: string) {
   return decoded ? { ...decoded, source: "plus_code" as const } : null;
 }
 
-export async function processImportRows(rows: ImportRow[], collectionId: string, mapping: ImportMapping, onProgress?: (done: number, total: number) => void) {
-  if (!supabase) throw new Error("Supabase chưa được cấu hình.");
+export function buildImportPayload(rows: ImportRow[], collectionId: string, mapping: ImportMapping, onProgress?: (done: number, total: number) => void) {
   const payload: Record<string, unknown>[] = [];
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
@@ -61,8 +59,5 @@ export async function processImportRows(rows: ImportRow[], collectionId: string,
     });
     onProgress?.(index + 1, rows.length);
   }
-  if (!payload.length) return 0;
-  const { error } = await supabase.from("restaurants").insert(payload);
-  if (error) throw new Error(error.message);
-  return payload.length;
+  return payload;
 }

@@ -1,8 +1,7 @@
 "use client";
 import { ChangeEvent, useMemo, useState } from "react";
 import { FileSpreadsheet, Upload, X } from "lucide-react";
-import { autoMapColumns, parseCsvText, parseImportFile, processImportRows, type ImportRow } from "@/lib/collection-importer";
-import { supabase } from "@/lib/supabase";
+import { autoMapColumns, buildImportPayload, parseCsvText, parseImportFile, type ImportRow } from "@/lib/collection-importer";
 import type { Collection } from "@/lib/types";
 
 type Source = "excel" | "google_sheets" | "manual";
@@ -14,8 +13,12 @@ export function CollectionImportModal({ onClose, onDone }: { onClose: () => void
   const loadRows = (nextRows: ImportRow[]) => { setRows(nextRows); setMessage(nextRows.length ? `Đã nhận diện ${nextRows.length} dòng.` : "Không tìm thấy dòng dữ liệu."); };
   const onFile = async (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; try { loadRows(await parseImportFile(file)); } catch { setMessage("Không thể đọc file này."); } };
   const loadSheet = async () => { setBusy(true); try { const response = await fetch(`/api/sync-sheet?url=${encodeURIComponent(sheetUrl)}`); const text = await response.text(); if (!response.ok) throw new Error(JSON.parse(text).error); loadRows(parseCsvText(text)); } catch (error) { setMessage(error instanceof Error ? error.message : "Không tải được Sheet."); } finally { setBusy(false); } };
-  const submit = async () => { if (!supabase || !name.trim()) return setMessage("Hãy nhập tên nguồn."); setBusy(true); try { const collection: Collection = { id: idFromName(name), name: name.trim(), icon: icon || "🍜", owner_name: owner.trim() || "Prot", type, source_type: source, google_sheets_url: source === "google_sheets" ? sheetUrl : null };
-    const { error } = await supabase.from("collections").insert(collection); if (error) throw new Error(error.message); const count = source === "manual" ? 0 : await processImportRows(rows, collection.id, mapping, (done, total) => setMessage(`Đang nạp ${done}/${total}…`)); await onDone(); setMessage(`Đã tạo nguồn và nạp ${count} quán.`); window.setTimeout(onClose, 900);
+  const submit = async () => { if (!name.trim()) return setMessage("Hãy nhập tên nguồn."); setBusy(true); try { const collection: Collection = { id: idFromName(name), name: name.trim(), icon: icon || "🍜", owner_name: owner.trim() || "Prot", type, source_type: source, google_sheets_url: source === "google_sheets" ? sheetUrl : null };
+    const restaurants = source === "manual" ? [] : buildImportPayload(rows, collection.id, mapping, (done, total) => setMessage(`Đang chuẩn bị ${done}/${total}…`));
+    const response = await fetch("/api/admin/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ collection, restaurants }) });
+    const body = await response.json().catch(() => null) as { count?: number; error?: string } | null;
+    if (!response.ok) throw new Error(body?.error || "Không thể nạp nguồn.");
+    await onDone(); setMessage(`Đã tạo nguồn và nạp ${body?.count || 0} quán.`); window.setTimeout(onClose, 900);
   } catch (error) { setMessage(error instanceof Error ? error.message : "Không thể nạp dữ liệu."); } finally { setBusy(false); } };
   return <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/40 p-0 backdrop-blur-sm md:items-center md:p-5"><section className="max-h-[94dvh] w-full max-w-2xl overflow-y-auto rounded-t-[28px] bg-[#fbf3ea] p-5 shadow-2xl dark:bg-[#281b13] md:rounded-[28px]"><div className="flex items-center justify-between"><div><p className="text-xs font-extrabold tracking-wider text-[#a35e2d]">ADMIN PROT</p><h2 className="text-xl font-extrabold">Nạp nguồn dữ liệu</h2></div><button type="button" onClick={onClose} className="rounded-xl p-2"><X /></button></div>
     <div className="mt-4 flex gap-2 overflow-x-auto">{(["excel", "google_sheets", "manual"] as Source[]).map((item) => <button type="button" key={item} onClick={() => setSource(item)} className={`rounded-xl px-3 py-2 text-xs font-bold ${source === item ? "bg-[#402c1e] text-white" : "bg-[#402c1e]/8"}`}>{item === "excel" ? "📂 Excel / CSV" : item === "google_sheets" ? "🌐 Google Sheets" : "✏ Tạo thủ công"}</button>)}</div>
