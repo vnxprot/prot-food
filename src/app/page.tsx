@@ -1667,8 +1667,15 @@ export default function Home() {
       navigator.geolocation.clearWatch(locationWatchRef.current);
     setLocationError("Đang yêu cầu quyền vị trí từ trình duyệt…");
     setLocationPermission("requesting");
-    const onPosition = (result: GeolocationPosition) =>
-      { setPosition({ lat: result.coords.latitude, lng: result.coords.longitude }); setLocationPermission("granted"); setToast("Đã lấy vị trí hiện tại."); }
+    const onPosition = (result: GeolocationPosition) => {
+      setPosition({ lat: result.coords.latitude, lng: result.coords.longitude });
+      setLocationPermission("granted");
+      // Start watching only after the initial permission prompt is resolved.
+      // Safari can ignore a prompt when getCurrentPosition and watchPosition
+      // are requested at the same time on first page load.
+      if (locationWatchRef.current == null)
+        locationWatchRef.current = navigator.geolocation.watchPosition(onPosition, onError, options);
+    };
     const onError = (error: GeolocationPositionError) => {
       const permission = error.code === 1 ? "denied" : error.code === 3 ? "timeout" : "unavailable";
       setLocationPermission(permission);
@@ -1677,15 +1684,9 @@ export default function Home() {
           ? "Quyền vị trí đang bị chặn. Hãy cho phép vị trí cho trang này trong cài đặt của trình duyệt rồi bấm thử lại."
           : "Chưa lấy được vị trí. Kiểm tra GPS rồi thử lại.",
       );
-      setToast(
-        error.code === 1
-          ? "Trình duyệt đang chặn vị trí. Hãy bật quyền Location cho prot-food.vercel.app rồi thử lại."
-          : "Chưa lấy được GPS. Hãy thử lại sau giây lát.",
-      );
     };
     const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
     navigator.geolocation.getCurrentPosition(onPosition, onError, options);
-    locationWatchRef.current = navigator.geolocation.watchPosition(onPosition, onError, options);
   }, []);
   useEffect(() => {
     if (tab !== "nearby" && tab !== "roulette") return;
@@ -2290,12 +2291,6 @@ export default function Home() {
                     <span className="truncate">{ward === "all" ? "Chọn phường / xã để lọc gần đúng" : ward}</span>
                     <Search size={14} className="text-[#a35e2d] shrink-0 ml-2" />
                   </button>
-                )}
-                {!position && (
-                  <div className="mt-2.5 rounded-xl border border-[#a35e2d]/20 bg-[#a35e2d]/8 px-3 py-2.5 text-xs text-[#70421f] dark:text-[#f7eadc]">
-                    <p className="font-extrabold">{locationPermission === "denied" ? "Trình duyệt chưa được cấp quyền vị trí" : locationPermission === "requesting" ? "Đang chờ trình duyệt xác nhận vị trí" : "Bật vị trí để xem khoảng cách"}</p>
-                    <p className="mt-1 leading-relaxed opacity-80">{locationError || "Bấm Cho phép vị trí để app yêu cầu GPS trên thiết bị này."}</p>
-                  </div>
                 )}
               </div>
               <SectionTitle>Lọc theo ngữ cảnh</SectionTitle>
