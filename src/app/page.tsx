@@ -197,19 +197,6 @@ function findWard(wardName: string | null, wards: Ward[]) {
   );
 }
 
-function addressAlreadyIncludesWard(address: string, ward?: string) {
-  if (!ward) return false;
-  const wardName = normalizeWardKey(ward);
-  if (!wardName) return false;
-  const wardPrefix = /^(xã|xa)\b/iu.test(ward) ? "(?:xa|x)" : "(?:phuong|p)";
-  const escapedWardName = wardName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // A street can share its name with a ward (for example Đường Láng and
-  // Phường Láng). Suppress the suffix only for an explicit ward marker.
-  return new RegExp(`(?:^|\\s)${wardPrefix}\\s+${escapedWardName}(?:\\s|$)`).test(
-    normalizeSearchText(address),
-  );
-}
-
 function displayWardName(ward: Ward | null | undefined) {
   if (!ward) return null;
   const prefix = ward.type === "xa" ? "Xã" : "Phường";
@@ -222,15 +209,19 @@ function displayAddress(address: string, wardName?: string | null) {
   const escapedWard = bareWard?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   let result = address
     .replace(/,?\s*(?:hà nội|ha noi|việt nam|viet nam)\b/giu, "")
+    // Postal codes are import/geocoder artefacts, not useful on compact cards.
+    .replace(/,?\s*\b\d{5,6}\b(?=\s*,|\s*$)/gu, "")
+    .replace(/,\s*,+/g, ",")
     .replace(/\s{2,}/g, " ")
     .replace(/\s*,\s*$/g, "")
     .trim();
   if (escapedWard) {
     result = result
+      // The card owns the only rendered ward suffix. Remove every imported
+      // spelling of that same ward, then append the canonical label once.
       .replace(new RegExp(`,?\\s*(?:phường|phuong|p\\.?|xã|xa)\\s+${escapedWard}\\b`, "giu"), "")
-      // If the final locality repeats the ward shown separately on the card,
-      // keep the standard "Phường/Xã …" suffix and remove the duplicate.
-      .replace(new RegExp(`,?\\s*${escapedWard}\\s*$`, "giu"), "")
+      .replace(new RegExp(`(?:,?\\s*${escapedWard})+\\s*$`, "giu"), "")
+      .replace(/,\s*,+/g, ",")
       .replace(/\s{2,}/g, " ")
       .replace(/\s*,\s*$/g, "")
       .trim();
@@ -534,9 +525,7 @@ function RestaurantCard({
           {addressLabel && (
             <p className="mt-1 text-[13px] leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
               {addressLabel}
-              {wardName &&
-                !addressAlreadyIncludesWard(addressLabel, wardName) &&
-                ` · ${wardName}`}
+              {wardName && ` · ${wardName}`}
             </p>
           )}
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -1084,12 +1073,7 @@ function Detail({
           <p className="flex items-start gap-2 text-sm leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
             <MapPin size={18} className="mt-0.5 shrink-0 text-[#a35e2d]" />
             {detailAddress || "Chưa có địa chỉ"}
-            {detailWardName &&
-              detailAddress &&
-              !addressAlreadyIncludesWard(
-                detailAddress,
-                detailWardName,
-              ) && (
+            {detailWardName && detailAddress && (
               <>
                 <br />
                 {detailWardName}
