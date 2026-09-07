@@ -1668,7 +1668,7 @@ export default function Home() {
     setLocationError("Đang yêu cầu quyền vị trí từ trình duyệt…");
     setLocationPermission("requesting");
     const onPosition = (result: GeolocationPosition) =>
-      { setPosition({ lat: result.coords.latitude, lng: result.coords.longitude }); setLocationPermission("granted"); };
+      { setPosition({ lat: result.coords.latitude, lng: result.coords.longitude }); setLocationPermission("granted"); setToast("Đã lấy vị trí hiện tại."); }
     const onError = (error: GeolocationPositionError) => {
       const permission = error.code === 1 ? "denied" : error.code === 3 ? "timeout" : "unavailable";
       setLocationPermission(permission);
@@ -1676,6 +1676,11 @@ export default function Home() {
         error.code === 1
           ? "Quyền vị trí đang bị chặn. Hãy cho phép vị trí cho trang này trong cài đặt của trình duyệt rồi bấm thử lại."
           : "Chưa lấy được vị trí. Kiểm tra GPS rồi thử lại.",
+      );
+      setToast(
+        error.code === 1
+          ? "Trình duyệt đang chặn vị trí. Hãy bật quyền Location cho prot-food.vercel.app rồi thử lại."
+          : "Chưa lấy được GPS. Hãy thử lại sau giây lát.",
       );
     };
     const options = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
