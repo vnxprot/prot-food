@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
 import { decodePlusCode, extractPlusCode } from "./plus-codes";
 
-export type ImportMapping = Partial<Record<"name" | "address" | "category" | "notes" | "coordinates", string>>;
+export type ImportMapping = Partial<Record<"name" | "address" | "category" | "notes" | "coordinates" | "latitude" | "longitude" | "ward", string>>;
 export type ImportRow = Record<string, unknown>;
 
 const dictionary: Record<keyof ImportMapping, string[]> = {
@@ -10,6 +10,9 @@ const dictionary: Record<keyof ImportMapping, string[]> = {
   category: ["loai", "danh muc", "mon", "category", "nhom mon", "type"],
   notes: ["ghi chu", "note", "notes", "mo ta", "danh gia", "review", "mon ngon"],
   coordinates: ["toa do", "coordinates", "coords", "plus code", "link maps", "url", "ma"],
+  latitude: ["latitude", "lat", "vi do"],
+  longitude: ["longitude", "lng", "lon", "kinh do"],
+  ward: ["phuong xa hien hanh", "phuong xa", "phuong", "ward", "commune", "xa"],
 };
 
 const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/đ/g, "d").replace(/[^a-z0-9]+/g, " ").trim();
@@ -42,20 +45,39 @@ function coordinates(raw: string) {
   return decoded ? { ...decoded, source: "plus_code" as const } : null;
 }
 
+function coordinatePair(latRaw: string, lngRaw: string) {
+  if (!latRaw || !lngRaw) return null;
+  const lat = Number(latRaw.replace(",", "."));
+  const lng = Number(lngRaw.replace(",", "."));
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+    ? { lat, lng, source: "manual" as const }
+    : null;
+}
+
 export function buildImportPayload(rows: ImportRow[], collectionId: string, mapping: ImportMapping, onProgress?: (done: number, total: number) => void) {
   const payload: Record<string, unknown>[] = [];
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const name = value(row, mapping.name);
     if (!name) { onProgress?.(index + 1, rows.length); continue; }
-    const address = value(row, mapping.address);
-    const point = coordinates(`${value(row, mapping.coordinates)} ${address}`);
+    const ward = value(row, mapping.ward);
+    const addressBase = value(row, mapping.address);
+    // Preserve the supplied administrative ward in the address so the UI can
+    // resolve and display it consistently even though the import API stores
+    // only address_raw (ward_id is assigned by the manual/geocode flow).
+    const address = ward && !new RegExp(`(?:phường|phuong|xã|xa)\\s+${ward.replace(/^(phường|phuong|xã|xa)\\s+/i, "").replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}`, "i").test(addressBase)
+      ? [addressBase, ward].filter(Boolean).join(", ")
+      : addressBase;
+    // Prefer explicit numeric columns. Legacy combined coordinates / Plus Code remains supported.
+    // Never scan the address itself: numbers such as "Tầng 4, 20 Tràng Tiền" are not coordinates.
+    const point = coordinatePair(value(row, mapping.latitude), value(row, mapping.longitude))
+      || coordinates(value(row, mapping.coordinates));
     payload.push({
       name, address_raw: address || null, category: value(row, mapping.category) || null,
       notes: value(row, mapping.notes) || null, collection_id: collectionId,
       status: "muon_den", geocode_source: point?.source || "unset",
-      geocode_confidence: point ? "high" : "low", lat: point?.lat ?? null, lng: point?.lng ?? null,
-      location_verification: "unverified",
+      geocode_confidence: point ? "manual" : "low", lat: point?.lat ?? null, lng: point?.lng ?? null,
+      location_verification: point ? "verified" : "unverified",
     });
     onProgress?.(index + 1, rows.length);
   }
