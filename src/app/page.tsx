@@ -1580,7 +1580,18 @@ export default function Home() {
     if (!collectionResult.error) {
       const nextCollections = collectionResult.data as Collection[];
       setCollections(nextCollections);
-      setSelectedCollectionIds((current) => current.length ? current.filter((id) => nextCollections.some((item) => item.id === id)) : nextCollections.map((item) => item.id));
+      // An empty array is a deliberate "all sources off" state. Only new
+      // users (no preference stored yet) should default to every source.
+      const stored = window.localStorage.getItem("prot-food-collections-v1");
+      if (stored == null) setSelectedCollectionIds(nextCollections.map((item) => item.id));
+      else {
+        try {
+          const parsed = JSON.parse(stored);
+          setSelectedCollectionIds(Array.isArray(parsed) ? parsed.filter((id) => nextCollections.some((item) => item.id === id)) : nextCollections.map((item) => item.id));
+        } catch {
+          setSelectedCollectionIds(nextCollections.map((item) => item.id));
+        }
+      }
     }
     setLoading(false);
   }
@@ -1592,7 +1603,7 @@ export default function Home() {
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) setSelectedCollectionIds(parsed);
+        if (Array.isArray(parsed)) setSelectedCollectionIds(parsed);
       } catch {
         /* Ignore invalid local storage. */
       }
@@ -1672,7 +1683,7 @@ export default function Home() {
     };
   }, [tab, getLocation]);
   const selectedRestaurants = useMemo(
-    () => restaurants.filter((item) => selectedCollectionIds.length === 0 || selectedCollectionIds.includes(item.collection_id || "prot_food")),
+    () => restaurants.filter((item) => selectedCollectionIds.includes(item.collection_id || "prot_food")),
     [restaurants, selectedCollectionIds],
   );
   const categories = useMemo(
