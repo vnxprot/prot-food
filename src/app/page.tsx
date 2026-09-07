@@ -2292,6 +2292,12 @@ export default function Home() {
                     <Search size={14} className="text-[#a35e2d] shrink-0 ml-2" />
                   </button>
                 )}
+                {!position && locationPermission === "denied" && (
+                  <div className="mt-2.5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-xs text-[#70421f] dark:text-[#f7eadc]">
+                    <p className="font-extrabold">Trình duyệt đang chặn quyền vị trí</p>
+                    <p className="mt-1 leading-relaxed opacity-85">Nhấn biểu tượng ổ khóa hoặc biểu tượng cài đặt cạnh thanh địa chỉ, đổi <span className="font-bold">Location</span> thành <span className="font-bold">Ask</span> hoặc <span className="font-bold">Allow</span>, rồi tải lại trang.</p>
+                  </div>
+                )}
               </div>
               <SectionTitle>Lọc theo ngữ cảnh</SectionTitle>
               <QuickContextFilter value={quickFilter} onChange={setQuickFilter} />
