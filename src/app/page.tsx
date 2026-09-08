@@ -1634,6 +1634,21 @@ export default function Home() {
     await refresh();
     notify(`Đã xóa nguồn ${collection.name}.`);
   };
+  const updateCategoryName = async (categoryName: string, nextName: string | null) => {
+    if (!isAdmin) return;
+    const matches = restaurants.filter((item) => (item.category || "") === categoryName);
+    if (!matches.length) return;
+    const label = nextName ? `đổi thành “${nextName}”` : "xoá khỏi các quán";
+    if (!window.confirm(`Xác nhận ${label} nhóm “${categoryName}” (${matches.length} quán)?`)) return;
+    const failures = await Promise.all(matches.map(async (item) => {
+      const response = await fetch("/api/admin/restaurants", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: item.id, payload: { category: nextName } }) });
+      return response.ok ? null : item.id;
+    }));
+    if (failures.some(Boolean)) return notify("Một số quán chưa cập nhật được. Hãy thử lại.");
+    setRestaurants((current) => current.map((item) => (item.category === categoryName ? { ...item, category: nextName } : item)));
+    if (category === categoryName) setCategory(nextName || "all");
+    notify(nextName ? `Đã đổi tên nhóm “${categoryName}”.` : `Đã xoá nhóm “${categoryName}”.`);
+  };
   useEffect(() => {
     if (!navigator.clipboard?.readText) return;
     navigator.clipboard
@@ -2374,6 +2389,7 @@ export default function Home() {
               </div>
               {settingsTab === "data" && <>
               <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Nguồn dữ liệu đang xem</p><p className="mt-1 text-xs text-[#8a7360]">Bật/tắt từng nguồn. Lựa chọn lưu riêng trên thiết bị và áp dụng cho các tab.</p><div className="mt-3"><CollectionPicker collections={collections} selectedIds={selectedCollectionIds} onChange={chooseCollections} isAdmin={isAdmin} onImport={() => setImportOpen(true)} onEdit={setEditingCollection} onDelete={(collection) => void deleteCollection(collection)} /></div></section>
+              {isAdmin && <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Quản lý nhóm món ăn</p><p className="mt-1 text-xs text-[#8a7360]">Đổi tên hoặc xoá nhóm sẽ áp dụng cho toàn bộ quán thuộc nhóm đó.</p><div className="mt-3 space-y-2">{categories.length ? categories.map((value) => <div key={value} className="flex items-center justify-between gap-3 rounded-xl border border-[#402c1e]/10 bg-white/45 px-3 py-2.5 dark:bg-black/10"><span className="min-w-0 truncate text-sm font-bold">{value}</span><div className="flex shrink-0 gap-1"><button type="button" aria-label={`Đổi tên nhóm ${value}`} onClick={() => { const next = window.prompt(`Tên mới cho nhóm “${value}”:`, value)?.trim(); if (next && next !== value) void updateCategoryName(value, next); }} className="rounded-lg p-2 text-[#a35e2d] hover:bg-[#a35e2d]/10"><Pencil size={15} /></button><button type="button" aria-label={`Xoá nhóm ${value}`} onClick={() => void updateCategoryName(value, null)} className="rounded-lg p-2 text-red-700 hover:bg-red-700/10"><Trash2 size={15} /></button></div></div>) : <p className="py-2 text-xs text-[#8a7360]">Chưa có nhóm món nào.</p>}</div></section>}
               <section className="glass rounded-[20px] p-4"><p className="text-sm font-extrabold">Chỉ đường mặc định</p><p className="mt-1 text-xs text-[#8a7360]">Dùng khi mở Google Maps.</p><div className="mt-3 flex gap-2"><Chip active={travelMode === "two-wheeler"} onClick={() => setPreferredTravelMode("two-wheeler")}><Bike className="mr-1 inline" size={14} /> Xe máy</Chip><Chip active={travelMode === "driving"} onClick={() => setPreferredTravelMode("driving")}><CarFront className="mr-1 inline" size={14} /> Ô tô</Chip></div></section>
               {isAdmin && <details className="glass rounded-[20px] p-4"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-extrabold"><FileCheck2 size={17} className="text-[#a35e2d]" />Báo cáo chất lượng tọa độ & xuất dữ liệu</summary><div className="mt-4"><ReportView restaurants={restaurants} notify={notify} /></div></details>}
               </>}
