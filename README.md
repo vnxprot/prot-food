@@ -42,3 +42,9 @@ Script dùng `SUPABASE_SERVICE_ROLE_KEY` nếu có, nếu không dùng `NEXT_PUB
 npm run test:v3.1
 npm run build
 ```
+
+## Nguồn dữ liệu và lịch đọc Supabase
+
+Migration `20261010000000_track_restaurant_entry_origin.sql` phân biệt quán thêm tay với quán nhập từ Excel/Google Sheets. Khi nhập lại một nguồn, chỉ quán nhập liệu được thay; quán thêm tay được giữ lại.
+
+Vercel Cron gọi `/api/cron/supabase-activity` mỗi ngày lúc 02:17 UTC (09:17 giờ Việt Nam). Endpoint đọc một bản ghi từ mỗi bảng `restaurants`, `admin_wards` và `collections`, trả lỗi nếu truy vấn thất bại. Đặt `CRON_SECRET` là biến bí mật trong môi trường Production của Vercel. Theo dõi Cron Logs và email cảnh báo pause của Supabase; lịch đọc hằng ngày không bảo đảm dự án Free sẽ không bị pause.

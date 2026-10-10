@@ -27,7 +27,8 @@ export async function POST(request: NextRequest) {
   if (collectionError) return NextResponse.json({ error: collectionError.message }, { status: 400 });
 
   if (!restaurants.length) return NextResponse.json({ count: 0 });
-  const { error: restaurantError } = await client.from("restaurants").insert(restaurants);
+  const imported = restaurants.map((item) => ({ ...item, collection_id: collection.id, entry_origin: "import" }));
+  const { error: restaurantError } = await client.from("restaurants").insert(imported);
   if (!restaurantError) return NextResponse.json({ count: restaurants.length });
 
   await client.from("collections").delete().eq("id", collection.id);
@@ -52,11 +53,12 @@ export async function PATCH(request: NextRequest) {
   if (current.is_default) return NextResponse.json({ error: "Không thể sửa nguồn dữ liệu mặc định." }, { status: 400 });
 
   if (body?.replaceRestaurants) {
-    const { data: previousRows, error: previousError } = await client.from("restaurants").select("*").eq("collection_id", collection.id);
+    const { data: previousRows, error: previousError } = await client.from("restaurants").select("*").eq("collection_id", collection.id).eq("entry_origin", "import");
     if (previousError) return NextResponse.json({ error: previousError.message }, { status: 400 });
-    const { error: deleteError } = await client.from("restaurants").delete().eq("collection_id", collection.id);
+    const { error: deleteError } = await client.from("restaurants").delete().eq("collection_id", collection.id).eq("entry_origin", "import");
     if (deleteError) return NextResponse.json({ error: deleteError.message }, { status: 400 });
-    const { error: insertError } = await client.from("restaurants").insert(body.restaurants || []);
+    const imported = (body.restaurants || []).map((item) => ({ ...item, collection_id: collection.id, entry_origin: "import" }));
+    const { error: insertError } = imported.length ? await client.from("restaurants").insert(imported) : { error: null };
     if (insertError) {
       if (previousRows?.length) await client.from("restaurants").insert(previousRows);
       return NextResponse.json({ error: insertError.message }, { status: 400 });

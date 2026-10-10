@@ -50,6 +50,7 @@ export type Restaurant = {
   created_at: string;
   updated_at: string;
   collection_id?: string | null;
+  entry_origin?: "manual" | "import";
   admin_wards?: Ward | null;
 };
 

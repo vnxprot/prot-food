@@ -632,6 +632,8 @@ function similarRestaurants(
 function RestaurantForm({
   restaurant,
   restaurants,
+  collections,
+  selectedCollectionIds,
   categories,
   adminWards,
   clipboardText,
@@ -640,14 +642,19 @@ function RestaurantForm({
 }: {
   restaurant: Restaurant | null;
   restaurants: Restaurant[];
+  collections: Collection[];
+  selectedCollectionIds: string[];
   categories: string[];
   adminWards: Ward[];
   clipboardText: string | null;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (collectionId: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<RestaurantDraft>(
     restaurant ? toDraft(restaurant) : emptyDraft(),
+  );
+  const [collectionId, setCollectionId] = useState(
+    restaurant?.collection_id || (restaurant ? "prot_food" : selectedCollectionIds.length === 1 ? selectedCollectionIds[0] : ""),
   );
   const [advanced, setAdvanced] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -709,6 +716,8 @@ function RestaurantForm({
       );
     if (!draft.name.trim()) return setError("Tên quán là mục bắt buộc.");
     if (!draft.category) return setError("Hãy chọn nhóm món.");
+    if (!collectionId || !collections.some((item) => item.id === collectionId))
+      return setError("Hãy chọn nguồn để lưu quán.");
     const coordinates = draft.coordinates
       .trim()
       .match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
@@ -743,6 +752,7 @@ function RestaurantForm({
       );
     const payload = {
       name: draft.name.trim(),
+      collection_id: collectionId,
       address_raw:
         geocoded?.formattedAddress || draft.address_raw.trim() || null,
       category: draft.category || null,
@@ -779,7 +789,7 @@ function RestaurantForm({
       setSaving(false);
       return;
     }
-    await onSaved();
+    await onSaved(collectionId);
     setSaving(false);
     onClose();
   }
@@ -809,6 +819,24 @@ function RestaurantForm({
           </button>
         </div>
         <form onSubmit={submit} className="space-y-4">
+          <Field label="Lưu vào nguồn *">
+            <select
+              required
+              value={collectionId}
+              onChange={(event) => setCollectionId(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Chọn nguồn dữ liệu</option>
+              {collections.map((collection) => (
+                <option key={collection.id} value={collection.id}>
+                  {collection.icon} {collection.name}{selectedCollectionIds.includes(collection.id) ? "" : " · đang tắt"}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-[#8a7360]">
+              Nguồn đang tắt vẫn có thể nhận quán; bật nguồn để xem sau khi lưu.
+            </p>
+          </Field>
           <Field label="Tên quán *">
             <input
               required
@@ -964,7 +992,7 @@ function RestaurantForm({
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#a35e2d] py-3 text-[14px] font-extrabold text-white transition hover:bg-[#8e4f26] disabled:opacity-60"
           >
             {saving && <Loader2 size={16} className="animate-spin" />}
-            {saving ? "Đang lưu…" : "Lưu quán"}
+            {saving ? "Đang lưu…" : `Lưu vào ${collections.find((item) => item.id === collectionId)?.name || "nguồn đã chọn"}`}
           </button>
         </form>
       </div>
@@ -1527,7 +1555,7 @@ export default function Home() {
   const [formTarget, setFormTarget] = useState<Restaurant | null | undefined>(
     undefined,
   );
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | { message: string; collectionId: string } | null>(null);
   const locationWatchRef = useRef<number | null>(null);
   const roadRoutesRef = useRef<Record<string, RoadRoute>>({});
   const notify = (message: string) => {
@@ -2040,9 +2068,14 @@ export default function Home() {
     notify("Đã xóa lịch sử check-in.");
     return true;
   }
-  async function afterSave() {
+  async function afterSave(collectionId: string) {
     await refresh();
-    notify("Đã lưu quán.");
+    const collectionName = collections.find((item) => item.id === collectionId)?.name || "nguồn đã chọn";
+    if (selectedCollectionIds.includes(collectionId)) notify(`Đã lưu quán vào ${collectionName}.`);
+    else {
+      setToast({ message: `Đã lưu vào ${collectionName}. Nguồn này đang tắt.`, collectionId });
+      window.setTimeout(() => setToast(null), 8000);
+    }
   }
   async function deleteSelected() {
     if (
@@ -2477,6 +2510,8 @@ export default function Home() {
         <RestaurantForm
           restaurant={formTarget}
           restaurants={restaurants}
+          collections={collections}
+          selectedCollectionIds={selectedCollectionIds}
           categories={categories}
           adminWards={adminWards}
           clipboardText={clipboardText}
@@ -2487,7 +2522,7 @@ export default function Home() {
       {(importOpen || editingCollection) && <CollectionImportModal collection={editingCollection} onClose={() => { setImportOpen(false); setEditingCollection(null); }} onDone={refresh} />}
       {toast && (
         <div className="fixed bottom-24 left-1/2 z-[70] -translate-x-1/2 rounded-full bg-[#402c1e] px-4 py-2 text-sm font-bold text-[#fbf3ea] shadow-xl md:bottom-6">
-          {toast}
+          {typeof toast === "string" ? toast : <span className="flex items-center gap-3">{toast.message}<button type="button" className="underline" onClick={() => { chooseCollections([...selectedCollectionIds, toast.collectionId]); setToast(null); }}>Bật để xem</button></span>}
         </div>
       )}
       <SearchableWardModal
