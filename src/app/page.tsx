@@ -253,76 +253,6 @@ function wardForRestaurant(restaurant: Restaurant, wards: Ward[]) {
   return restaurant.admin_wards || findWardFromAddress(restaurant.address_raw, wards);
 }
 
-function useSwipeToClose(onSwipe: () => void) {
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
-  const closing = useRef(false);
-  const [offset, setOffset] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const begin = (x: number, y: number) => {
-    touchStart.current = { x, y };
-    closing.current = false;
-    setDragging(true);
-    setOffset(0);
-  };
-  const move = (x: number, y: number) => {
-    if (!touchStart.current || closing.current) return;
-    const deltaX = x - touchStart.current.x;
-    const deltaY = y - touchStart.current.y;
-    // Only a deliberate left-swipe moves the page. Vertical scrolling remains native.
-    if (deltaX >= 0 || Math.abs(deltaY) >= Math.abs(deltaX)) return;
-    setOffset(deltaX);
-  };
-  const finish = (x: number, y: number) => {
-    if (!touchStart.current) return;
-    const deltaX = x - touchStart.current.x;
-    const deltaY = y - touchStart.current.y;
-    touchStart.current = null;
-    setDragging(false);
-    if (deltaX <= -88 && Math.abs(deltaX) > Math.abs(deltaY)) {
-      closing.current = true;
-      setOffset(-window.innerWidth);
-      window.setTimeout(onSwipe, 220);
-      return;
-    }
-    setOffset(0);
-  };
-  return {
-    style: {
-      transform: `translate3d(${offset}px, 0, 0)`,
-      transition: dragging ? "none" : "transform 220ms cubic-bezier(0.22, 1, 0.36, 1)",
-    },
-    onPointerDown: (event: React.PointerEvent) => {
-      if (event.pointerType === "touch") begin(event.clientX, event.clientY);
-    },
-    onPointerMove: (event: React.PointerEvent) => {
-      if (event.pointerType === "touch") move(event.clientX, event.clientY);
-    },
-    onPointerUp: (event: React.PointerEvent) => {
-      if (event.pointerType === "touch") finish(event.clientX, event.clientY);
-    },
-    onPointerCancel: () => {
-      touchStart.current = null;
-      setDragging(false);
-      setOffset(0);
-    },
-    onTouchStart: (event: React.TouchEvent) => {
-      if ("PointerEvent" in window) return;
-      const touch = event.changedTouches[0];
-      begin(touch.clientX, touch.clientY);
-    },
-    onTouchMove: (event: React.TouchEvent) => {
-      if ("PointerEvent" in window) return;
-      const touch = event.changedTouches[0];
-      move(touch.clientX, touch.clientY);
-    },
-    onTouchEnd: (event: React.TouchEvent) => {
-      if ("PointerEvent" in window) return;
-      const touch = event.changedTouches[0];
-      finish(touch.clientX, touch.clientY);
-    },
-  };
-}
-
 function useBottomSheetDismiss(onDismiss: () => void) {
   const startY = useRef<number | null>(null);
   const dismissed = useRef(false);
@@ -663,8 +593,16 @@ function RestaurantForm({
   const [clipboardMessage, setClipboardMessage] = useState<string | null>(null);
   const formSheetRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const { style: swipeStyle, ...swipeHandlers } = useSwipeToClose(onClose);
+  const notesInputRef = useRef<HTMLTextAreaElement>(null);
+  const { style: sheetStyle, ...sheetDismissHandlers } = useBottomSheetDismiss(onClose);
   useModalBodyLock();
+  useEffect(() => {
+    const input = notesInputRef.current;
+    if (input) {
+      input.style.height = "auto";
+      input.style.height = `${input.scrollHeight}px`;
+    }
+  }, [draft.notes]);
   useEffect(() => {
     if (restaurant) return;
     formSheetRef.current?.scrollTo({ top: 0 });
@@ -794,14 +732,16 @@ function RestaurantForm({
     onClose();
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-[#1c130d]/35 p-0 backdrop-blur-sm md:items-center md:p-6">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#1c130d]/35 p-0 backdrop-blur-sm md:items-center md:p-6">
       <div
-        {...swipeHandlers}
         ref={formSheetRef}
-        style={swipeStyle}
-        className="h-[100dvh] max-h-[100dvh] w-full max-w-xl touch-pan-y overflow-y-auto overscroll-contain bg-[#fbf3ea] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-2xl dark:bg-[#281b13] md:h-auto md:max-h-[92dvh] md:rounded-[20px] md:p-5"
+        style={sheetStyle}
+        className="max-h-[88dvh] w-full max-w-xl touch-pan-y overflow-y-auto overscroll-contain rounded-t-[28px] bg-[#fbf3ea] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2 shadow-2xl dark:bg-[#281b13] md:max-h-[92dvh] md:rounded-[24px] md:p-5"
       >
-        <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-4 flex items-center justify-between border-b border-[#402c1e]/8 bg-[#fbf3ea]/95 px-4 pb-3 pt-[calc(1rem+env(safe-area-inset-top))] backdrop-blur-xl dark:bg-[#281b13]/95 md:static md:mx-0 md:mt-0 md:border-0 md:bg-transparent md:px-0 md:pb-0 md:pt-0 md:backdrop-blur-none">
+        <div {...sheetDismissHandlers} className="mx-auto flex w-full touch-none cursor-grab items-center justify-center py-2 md:hidden" aria-label="Đóng">
+          <span className="h-1.5 w-12 rounded-full bg-[#a35e2d]/50 dark:bg-[#e5a36a]/65" />
+        </div>
+        <div className="sticky top-0 z-10 -mx-4 mb-3 flex items-center justify-between border-b border-[#402c1e]/8 bg-[#fbf3ea]/95 px-4 py-2 backdrop-blur-xl dark:bg-[#281b13]/95 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
           <div>
             <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">
               PROT FOOD
@@ -818,7 +758,7 @@ function RestaurantForm({
             <X size={20} />
           </button>
         </div>
-        <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit} className="space-y-3">
           <Field label="Lưu vào nguồn *">
             <select
               required
@@ -912,9 +852,11 @@ function RestaurantForm({
           </Field>
           <Field label="Ghi chú">
             <textarea
+              ref={notesInputRef}
+              rows={1}
               value={draft.notes}
               onChange={(e) => set("notes", e.target.value)}
-              className={`${inputClass} min-h-24 resize-y`}
+              className={`${inputClass} block resize-none overflow-hidden`}
               placeholder="Điều cần nhớ về quán..."
             />
           </Field>
@@ -1057,16 +999,16 @@ function Detail({
       <aside
           onTouchMove={(event) => event.stopPropagation()}
           style={sheetStyle}
-          className="isolate h-[88dvh] w-full max-w-xl touch-pan-y overscroll-contain overflow-y-auto rounded-t-[30px] bg-[#fbf3ea] px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-[#281b13] md:h-full md:rounded-none md:py-6"
+          className="isolate h-[88dvh] w-full max-w-xl touch-pan-y overscroll-contain overflow-y-auto rounded-t-[28px] bg-[#fbf3ea] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2 shadow-2xl dark:bg-[#281b13] md:h-full md:rounded-none md:p-5"
       >
         <div
           {...sheetDismissHandlers}
-          className="mx-auto mb-3 flex w-full touch-none cursor-grab items-center justify-center py-2 md:hidden"
-          aria-label="Vuốt xuống để đóng"
+          className="mx-auto flex w-full touch-none cursor-grab items-center justify-center py-2 md:hidden"
+          aria-label="Đóng"
         >
-          <span className="h-2 w-16 rounded-full bg-[#a35e2d]/60 shadow-sm dark:bg-[#e5a36a]/65" />
+          <span className="h-1.5 w-12 rounded-full bg-[#a35e2d]/50 dark:bg-[#e5a36a]/65" />
         </div>
-        <div className="sticky top-0 z-20 -mx-5 mb-6 flex items-center justify-between border-b border-[#402c1e]/10 bg-[#fbf3ea]/95 px-3 py-3 backdrop-blur dark:bg-[#281b13]/95 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
+        <div className="sticky top-0 z-20 -mx-4 mb-3 flex items-center justify-between border-b border-[#402c1e]/10 bg-[#fbf3ea]/95 px-4 py-2 backdrop-blur dark:bg-[#281b13]/95 md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
           <button
             onClick={onClose}
             className="flex items-center gap-1 rounded-xl bg-[#402c1e]/8 px-2.5 py-2 text-sm font-bold"
@@ -1097,7 +1039,7 @@ function Detail({
         <h2 className="mt-1 text-3xl font-extrabold leading-tight">
           {restaurant.name}
         </h2>
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <StatusBadge status={restaurant.status} />
           <TasteBadge taste={restaurant.taste_rating} />
           {restaurant.geocode_confidence === "low" && (
@@ -1106,7 +1048,7 @@ function Detail({
             </span>
           )}
         </div>
-        <div className="glass mt-6 rounded-[20px] p-4">
+        <div className="glass mt-4 rounded-[20px] p-4">
           <p className="flex items-start gap-2 text-sm leading-relaxed text-[#6b5644] dark:text-[#cbb4a0]">
             <MapPin size={18} className="mt-0.5 shrink-0 text-[#a35e2d]" />
             {detailAddress || "Chưa có địa chỉ"}
@@ -1127,7 +1069,7 @@ function Detail({
             Mở Google Maps
           </a>
         </div>
-        <section className="mt-7">
+        <section className="mt-4">
           <SectionTitle>Trạng thái</SectionTitle>
           <div className="flex gap-2">
             <Chip

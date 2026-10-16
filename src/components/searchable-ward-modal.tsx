@@ -74,9 +74,9 @@ export function SearchableWardModal({
   };
   return (
     <div className="fixed inset-0 z-[60] flex max-w-[100vw] items-end overflow-hidden bg-[#140e0a]/45 p-0 backdrop-blur-sm md:items-center md:justify-center md:p-6">
-      <section className="glass flex h-[78dvh] max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl dark:bg-[#281b13]/92 md:h-[680px] md:rounded-[28px] md:pb-5">
-        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#402c1e]/20 dark:bg-white/20 md:hidden" />
-        <div className="mb-4 flex items-center justify-between">
+      <section className="glass flex h-[78dvh] max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[28px] px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2 shadow-2xl dark:bg-[#281b13]/92 md:h-[680px] md:rounded-[24px] md:p-5">
+        <div className="mx-auto mb-2 mt-2 h-1.5 w-12 shrink-0 rounded-full bg-[#a35e2d]/50 dark:bg-[#e5a36a]/65 md:hidden" />
+        <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-[11px] font-extrabold tracking-wider text-[#a35e2d]">BỘ LỌC ĐỊA BÀN</p>
             <h2 className="text-xl font-extrabold">Chọn phường / xã</h2>
